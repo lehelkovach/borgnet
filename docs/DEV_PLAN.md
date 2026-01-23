@@ -35,6 +35,28 @@ node failure and adversarial behavior.
 2) IAC bus transport adapter for messaging.
 3) Metrics and evaluation hooks for resilience and throughput.
 
+## Future Plans
+### Protocol and Security
+- Formal JSON schema for message envelopes.
+- Signed goals with chain‑of‑custody and nonce.
+- Quorum approvals for high‑impact actions.
+
+### Simulation and Learning
+- Demand map with decay and competition.
+- Memetic strategy registry and propagation rules.
+- Reward shaping for resilience and controlled growth.
+- Optional RL training loop (CTDE).
+
+### Transport and Infrastructure
+- NATS or Redis Streams adapters.
+- Optional libp2p mesh layer experiments.
+- Lease coordination concepts inspired by etcd/Consul.
+
+### Evaluation
+- Scenario suites for node loss and partition.
+- Stress tests for oversubscription and backlog spikes.
+- Regression metrics for resilience and throughput.
+
 ## Architecture Notes
 - Control plane: global goal DAG, resource budgets, spawn limits.
 - Agent mesh: local decision rules, role shifts, gossip presence.
