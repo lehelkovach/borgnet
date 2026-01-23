@@ -27,3 +27,8 @@ Solutions It Provides
 - Faster recovery via self-healing requeue mechanisms
 - Distributed planning across heterogeneous tools/resources
 - Auditable decision trail for accountability and debugging
+
+Top 3 Focus Areas
+- Simulation engine (agent loop, leases, demand map)
+- IAC bus adapter (HTTP transport)
+- Metrics and evaluation hooks

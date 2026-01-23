@@ -30,6 +30,11 @@ node failure and adversarial behavior.
    - IAC Bus adapter (HTTP).
    - Optional adapters: NATS or Redis Streams.
 
+## Top 3 Implementation Priorities
+1) Simulation engine (task leases, requeue, demand map stubs).
+2) IAC bus transport adapter for messaging.
+3) Metrics and evaluation hooks for resilience and throughput.
+
 ## Architecture Notes
 - Control plane: global goal DAG, resource budgets, spawn limits.
 - Agent mesh: local decision rules, role shifts, gossip presence.
