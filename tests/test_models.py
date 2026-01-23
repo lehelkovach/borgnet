@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from borgnet.models import MessageEnvelope, PresencePayload, TaskPayload
 
@@ -6,7 +6,7 @@ from borgnet.models import MessageEnvelope, PresencePayload, TaskPayload
 def test_message_envelope_defaults():
     msg = MessageEnvelope(
         id="msg-1",
-        ts=datetime.utcnow(),
+        ts=datetime.now(timezone.utc),
         performative="inform",
         sender="agent-a",
         conversation_id="conv-1",
