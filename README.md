@@ -48,10 +48,32 @@ are decomposed into subgoals and executed by a self‑organizing swarm.
 - Auditable decision trail for accountability and debugging
 
 ## Current Modules
-- Simulation core (`borgnet/sim.py`)
-- Metrics hooks (`borgnet/metrics.py`)
-- IAC Bus adapter (`borgnet/transport/iac_bus.py`)
-- Protocol draft (`docs/PROTOCOL.md`)
+- **Simulation** (`borgnet/sim.py`) — task leasing, requeue, agent loop
+- **Metrics** (`borgnet/metrics.py`) — throughput, failure, resilience tracking
+- **Stigmergy** (`borgnet/stigmergy.py`) — demand map for decentralized task selection
+- **Memetic** (`borgnet/memetic.py`) — strategy pool with evolution and propagation
+- **Security** (`borgnet/security.py`) — signed envelopes, quorum voting, trust scoring
+- **Models** (`borgnet/models.py`) — Pydantic message/task/presence schemas
+- **Transport** (`borgnet/transport/iac_bus.py`) — IAC Bus HTTP adapter
+
+## Tests
+- 64 unit and integration tests
+- Run with `pytest -v`
+- Live transport tests require running IAC bus (`BUS_URL` env var)
+
+## Quick Start
+```bash
+# Clone
+git clone https://github.com/lehelkovach/borgnet.git
+cd borgnet
+
+# Create venv and install deps
+python3 -m venv .venv
+./.venv/bin/pip install pydantic requests networkx pytest pytest-cov
+
+# Run tests
+./.venv/bin/pytest -v
+```
 
 ## Repository Docs
 - `docs/DEV_PLAN.md` — roadmap and milestones
