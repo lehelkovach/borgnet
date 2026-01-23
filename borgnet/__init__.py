@@ -2,6 +2,7 @@
 
 __version__ = "0.1.0"
 
+from borgnet.logging import configure_logging, get_logger, set_level
 from borgnet.models import MessageEnvelope, PresencePayload, TaskPayload
 from borgnet.metrics import Metrics
 from borgnet.sim import Agent, Simulation, Task
@@ -15,6 +16,9 @@ from borgnet.security import (
 )
 
 __all__ = [
+    "configure_logging",
+    "get_logger",
+    "set_level",
     "MessageEnvelope",
     "PresencePayload",
     "TaskPayload",
