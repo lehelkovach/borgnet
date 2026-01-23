@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "borgnet"
+version = "0.1.0"
+description = "Distributed adaptive memetic hive for goal-directed agents."
+authors = ["Lehel Kovach"]
+readme = "README.md"
+packages = [{include = "borgnet"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+networkx = "^3.3"
+pydantic = "^2.7"
+requests = "^2.31"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
