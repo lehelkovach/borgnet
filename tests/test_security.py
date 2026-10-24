@@ -3,6 +3,7 @@
 import time
 
 from borgnet.security import (
+    EnvelopeVerifier,
     QuorumManager,
     SignedEnvelope,
     TrustRegistry,
@@ -46,6 +47,69 @@ class TestSignedEnvelope:
     def test_no_expiry(self):
         env = SignedEnvelope(goal_id="goal-1", origin_id="agent-a")
         assert env.is_expired() is False
+
+    def test_signature_covers_payload(self):
+        # Tampering with the payload after signing must invalidate the signature.
+        env = SignedEnvelope(
+            goal_id="goal-1", origin_id="agent-a", payload={"action": "read"}
+        )
+        env.compute_signature("secret")
+        assert env.verify_signature("secret") is True
+        env.payload["action"] = "delete_everything"
+        assert env.verify_signature("secret") is False
+
+    def test_signature_covers_chain_of_custody(self):
+        # Tampering with provenance must invalidate the signature.
+        env = SignedEnvelope(
+            goal_id="goal-1", origin_id="agent-a", chain_of_custody=["agent-a"]
+        )
+        env.compute_signature("secret")
+        env.chain_of_custody.append("attacker")
+        assert env.verify_signature("secret") is False
+
+    def test_signature_covers_expiry(self):
+        # Extending the expiry after signing must invalidate the signature.
+        env = SignedEnvelope(
+            goal_id="goal-1", origin_id="agent-a", expires_at=time.time() + 10
+        )
+        env.compute_signature("secret")
+        env.expires_at = time.time() + 10_000
+        assert env.verify_signature("secret") is False
+
+
+class TestEnvelopeVerifier:
+    def test_accepts_fresh_signed_envelope(self):
+        env = SignedEnvelope(goal_id="goal-1", origin_id="agent-a")
+        env.compute_signature("secret")
+        verifier = EnvelopeVerifier("secret")
+        assert verifier.verify(env) is True
+
+    def test_rejects_bad_signature(self):
+        env = SignedEnvelope(goal_id="goal-1", origin_id="agent-a")
+        env.compute_signature("secret")
+        assert EnvelopeVerifier("wrong-secret").verify(env) is False
+
+    def test_rejects_replayed_nonce(self):
+        env = SignedEnvelope(goal_id="goal-1", origin_id="agent-a")
+        env.compute_signature("secret")
+        verifier = EnvelopeVerifier("secret")
+        assert verifier.verify(env) is True
+        # Replaying the identical, validly signed envelope must be rejected.
+        assert verifier.verify(env) is False
+
+    def test_rejects_expired_envelope(self):
+        env = SignedEnvelope(
+            goal_id="goal-1", origin_id="agent-a", expires_at=time.time() - 1
+        )
+        env.compute_signature("secret")
+        assert EnvelopeVerifier("secret").verify(env) is False
+
+    def test_distinct_nonces_both_accepted(self):
+        verifier = EnvelopeVerifier("secret")
+        for _ in range(2):
+            env = SignedEnvelope(goal_id="goal-1", origin_id="agent-a")
+            env.compute_signature("secret")
+            assert verifier.verify(env) is True
 
 
 class TestQuorumManager:
