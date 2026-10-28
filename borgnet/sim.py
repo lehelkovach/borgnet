@@ -142,6 +142,25 @@ class Simulation:
                 old_status,
             )
 
+    def requeue_task(self, task_id: str) -> None:
+        """Return an owned/running task to the queue (self-healing requeue).
+
+        Used when a worker dies mid-task: the lease is dropped and the task
+        becomes available for a healthy peer, the same outcome lease expiry
+        produces in :meth:`tick`, but without waiting for the lease to lapse.
+        """
+        if task_id not in self.tasks:
+            _log.error("Cannot requeue unknown task: task_id=%s", task_id)
+            raise KeyError(f"Task not found: {task_id}")
+
+        task = self.tasks[task_id]
+        old_owner = task.owner
+        task.status = "queued"
+        task.owner = None
+        task.lease_expires_at = None
+        self.metrics.task_reassigned()
+        _log.info("Task requeued: task=%s old_owner=%s", task_id, old_owner)
+
     def get_queued_tasks(self) -> List[Task]:
         """Return all tasks in queued status."""
         queued = [t for t in self.tasks.values() if t.status == "queued"]
