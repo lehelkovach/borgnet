@@ -14,6 +14,7 @@ from borgnet.security import (
     TrustRegistry,
     TrustScore,
 )
+from borgnet.agent import AgentRunner, StepResult, StubWorker, Worker
 
 __all__ = [
     "configure_logging",
@@ -34,4 +35,8 @@ __all__ = [
     "SignedEnvelope",
     "TrustRegistry",
     "TrustScore",
+    "AgentRunner",
+    "StepResult",
+    "StubWorker",
+    "Worker",
 ]
