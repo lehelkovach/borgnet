@@ -61,7 +61,8 @@ class StubWorker:
 class StepResult:
     """Outcome of a single :meth:`AgentRunner.step`."""
 
-    outcome: str  # "completed" | "failed" | "requeued" | "idle" | "quarantined"
+    # "completed" | "failed" | "requeued" | "lease_lost" | "idle" | "quarantined"
+    outcome: str
     task_id: Optional[str] = None
     strategy_id: Optional[str] = None
     fitness: Optional[float] = None
@@ -112,6 +113,9 @@ class AgentRunner:
         pheromone deposit), and the agent then prefers the handleable task
         whose type currently has the highest demand.
         """
+        # Let old signals decay before reading the map. Without evaporation,
+        # demand only ever grows and never reflects work that is finished.
+        self.demand.evaporate()
         candidates = [t for t in self.sim.get_queued_tasks() if self._can_handle(t)]
         if not candidates:
             return None
@@ -164,14 +168,24 @@ class AgentRunner:
             # The task still needs doing: reinforce demand and requeue it so a
             # healthy peer can pick it up.
             self.demand.deposit(task.task_type, amount=1.0)
-            self.sim.requeue_task(task.task_id)
+            self.sim.requeue_task(task.task_id, agent_id=self.agent.agent_id)
             return StepResult(
                 outcome="requeued", task_id=task.task_id, strategy_id=strategy_id
             )
 
         # Worker returned: report success or failure by fitness.
         success = fitness > self.success_threshold
-        self.sim.complete_task(task.task_id, success=success)
+        if not self.sim.complete_task(
+            task.task_id, success=success, agent_id=self.agent.agent_id
+        ):
+            # The lease expired and the task moved on while the worker ran, so
+            # this result no longer counts toward trust or strategy fitness.
+            return StepResult(
+                outcome="lease_lost",
+                task_id=task.task_id,
+                strategy_id=strategy_id,
+                fitness=fitness,
+            )
         if success:
             self.trust.record_success(self.agent.agent_id)
         else:

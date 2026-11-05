@@ -97,3 +97,33 @@ class TestAgentRunner:
         assert result.outcome == "completed"
         assert result.strategy_id is None
         assert sim.tasks["t1"].status == "done"
+
+    def test_demand_evaporates_between_steps(self):
+        # Old signals decay before the map is read. decay_rate=1.0 removes
+        # any signal after any elapsed time, which makes this deterministic.
+        runner, _, _, _, _ = _runner(StubWorker(fitness=1.0))
+        runner.demand = DemandMap(decay_rate=1.0)
+        runner.demand.deposit("stale-type", amount=5.0)
+        runner.step()
+        assert runner.demand.get_intensity("stale-type") == 0.0
+        assert runner.demand.get_intensity("deploy") > 0.0
+
+    def test_lost_lease_result_is_not_credited(self):
+        # A worker that outlives its lease: the task is requeued by tick()
+        # while the worker runs, so the late result must not count.
+        class SlowWorker:
+            def __init__(self, sim):
+                self.sim = sim
+
+            def run(self, task, strategy):
+                self.sim.tick(task.lease_ttl + 1)
+                return 1.0
+
+        runner, sim, pool, _, trust = _runner(StubWorker())
+        runner.worker = SlowWorker(sim)
+        result = runner.step()
+        assert result.outcome == "lease_lost"
+        assert sim.tasks["t1"].status == "queued"
+        assert sim.metrics.completed_tasks == 0
+        assert trust.get_or_create("a1").score == 1.0
+        assert pool.strategies[result.strategy_id].fitness == 0.0
