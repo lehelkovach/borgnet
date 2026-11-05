@@ -3,12 +3,24 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
 import hmac
 import json
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+)
 
 from borgnet.logging import get_logger
 
@@ -100,38 +112,105 @@ class SignedEnvelope:
 
 
 class EnvelopeVerifier:
-    """Stateful verifier enforcing signature, expiry, and replay protection.
+    """Stateful verifier enforcing signature, freshness, and replay protection.
 
     A valid signature alone does not make an envelope safe to act on: a
     captured envelope can be replayed verbatim, and its signature still
     verifies. This verifier rejects an envelope whose signature is invalid,
     whose expiry has passed, or whose nonce has already been accepted.
+
+    Keys: pass ``secret`` for one key shared by every agent, or ``keys`` to
+    give each origin its own key. With per-origin keys, an envelope verifies
+    only under the key of the origin it names, so holding one agent's key
+    does not let you sign as another. Envelopes from origins without a key
+    are rejected. The keys are symmetric, so the verifier itself could still
+    sign as anyone.
+
+    Freshness: with ``max_age_s``, an envelope issued more than ``max_age_s``
+    ago, or more than ``clock_skew_s`` in the future, is rejected.
+
+    Memory: a nonce is forgotten once its envelope would fail the expiry or
+    age check anyway, so a replay is still rejected. With ``max_age_s`` set
+    the nonce store stays bounded. Without it, nonces of envelopes that have
+    no expiry are kept for the life of the verifier.
     """
 
-    def __init__(self, secret: str):
+    def __init__(
+        self,
+        secret: Optional[str] = None,
+        *,
+        keys: Optional[Mapping[str, str]] = None,
+        max_age_s: Optional[float] = None,
+        clock_skew_s: float = 5.0,
+        clock: Callable[[], float] = time.time,
+    ):
+        if (secret is None) == (keys is None):
+            raise ValueError("pass exactly one of secret or keys")
+        if max_age_s is not None and max_age_s <= 0:
+            raise ValueError(f"max_age_s must be > 0, got {max_age_s}")
+        if clock_skew_s < 0:
+            raise ValueError(f"clock_skew_s must be >= 0, got {clock_skew_s}")
         self._secret = secret
-        self._seen_nonces: Set[str] = set()
+        self._keys: Optional[Dict[str, str]] = dict(keys) if keys is not None else None
+        self.max_age_s = max_age_s
+        self.clock_skew_s = clock_skew_s
+        self._clock = clock
+        # nonce -> time after which it can be forgotten (None: never)
+        self._seen_nonces: Dict[str, Optional[float]] = {}
+        self._forget_queue: List[Tuple[float, str]] = []
+
+    @property
+    def remembered_nonces(self) -> int:
+        """Number of nonces currently held for replay detection."""
+        return len(self._seen_nonces)
+
+    def _reject(self, reason: str, envelope: "SignedEnvelope") -> bool:
+        _log.warning(
+            "Envelope rejected (%s): goal=%s origin=%s nonce=%s",
+            reason,
+            envelope.goal_id,
+            envelope.origin_id,
+            envelope.nonce,
+        )
+        return False
+
+    def _forget_after(self, envelope: "SignedEnvelope") -> Optional[float]:
+        limits = []
+        if envelope.expires_at is not None:
+            limits.append(envelope.expires_at)
+        if self.max_age_s is not None:
+            limits.append(envelope.issued_at + self.max_age_s)
+        return min(limits) if limits else None
+
+    def _prune(self, now: float) -> None:
+        while self._forget_queue and self._forget_queue[0][0] < now:
+            _, nonce = heapq.heappop(self._forget_queue)
+            self._seen_nonces.pop(nonce, None)
 
     def verify(self, envelope: "SignedEnvelope") -> bool:
         """Return True only for a fresh, unexpired, correctly signed envelope."""
-        if not envelope.verify_signature(self._secret):
+        now = self._clock()
+        self._prune(now)
+
+        key = self._secret if self._keys is None else self._keys.get(envelope.origin_id)
+        if key is None:
+            return self._reject("unknown origin", envelope)
+        if not envelope.verify_signature(key):
             return False
-        if envelope.is_expired():
-            _log.warning(
-                "Envelope rejected (expired): goal=%s origin=%s",
-                envelope.goal_id,
-                envelope.origin_id,
-            )
-            return False
+        if envelope.expires_at is not None and now > envelope.expires_at:
+            return self._reject("expired", envelope)
+        if self.max_age_s is not None:
+            if now > envelope.issued_at + self.max_age_s:
+                return self._reject("too old", envelope)
+            if envelope.issued_at > now + self.clock_skew_s:
+                return self._reject("issued in the future", envelope)
         if envelope.nonce in self._seen_nonces:
-            _log.warning(
-                "Envelope rejected (replayed nonce): goal=%s origin=%s nonce=%s",
-                envelope.goal_id,
-                envelope.origin_id,
-                envelope.nonce,
-            )
-            return False
-        self._seen_nonces.add(envelope.nonce)
+            return self._reject("replayed nonce", envelope)
+
+        forget_after = self._forget_after(envelope)
+        self._seen_nonces[envelope.nonce] = forget_after
+        if forget_after is not None:
+            heapq.heappush(self._forget_queue, (forget_after, envelope.nonce))
         return True
 
 

@@ -2,6 +2,8 @@
 
 import time
 
+import pytest
+
 from borgnet.security import (
     EnvelopeVerifier,
     QuorumManager,
@@ -281,3 +283,84 @@ class TestQuorumIntegrity:
                 assert False, "expected ValueError"
             except ValueError:
                 pass
+
+
+class _Clock:
+    def __init__(self, now=1_000.0):
+        self.now = now
+
+    def __call__(self):
+        return self.now
+
+
+def _signed(key, origin="agent-a", issued_at=1_000.0, **kwargs):
+    env = SignedEnvelope(goal_id="goal-1", origin_id=origin, issued_at=issued_at, **kwargs)
+    env.compute_signature(key)
+    return env
+
+
+class TestEnvelopeVerifierKeysAndFreshness:
+    def test_per_origin_keys(self):
+        verifier = EnvelopeVerifier(keys={"agent-a": "key-a", "agent-b": "key-b"})
+        assert verifier.verify(_signed("key-a", origin="agent-a")) is True
+        # agent-b's key cannot sign for agent-a.
+        assert verifier.verify(_signed("key-b", origin="agent-a")) is False
+        assert verifier.verify(_signed("key-x", origin="mallory")) is False
+
+    def test_exactly_one_key_source_required(self):
+        for kwargs in ({}, {"secret": "s", "keys": {"a": "k"}}):
+            with pytest.raises(ValueError):
+                EnvelopeVerifier(**kwargs)
+
+    def test_rejects_too_old_and_future_envelopes(self):
+        clock = _Clock(1_000.0)
+        verifier = EnvelopeVerifier("s", max_age_s=60, clock_skew_s=5, clock=clock)
+        assert verifier.verify(_signed("s", issued_at=950.0)) is True
+        assert verifier.verify(_signed("s", issued_at=939.0)) is False  # 61s old
+        assert verifier.verify(_signed("s", issued_at=1_004.0)) is True  # within skew
+        assert verifier.verify(_signed("s", issued_at=1_006.0)) is False  # too far ahead
+
+    def test_replay_rejected_until_envelope_is_too_old(self):
+        clock = _Clock(1_000.0)
+        verifier = EnvelopeVerifier("s", max_age_s=60, clock=clock)
+        env = _signed("s", issued_at=1_000.0)
+        assert verifier.verify(env) is True
+        clock.now = 1_059.0
+        assert verifier.verify(env) is False  # replay inside the window
+        clock.now = 1_061.0
+        assert verifier.verify(env) is False  # too old, and its nonce is forgotten
+        assert verifier.remembered_nonces == 0
+
+    def test_nonce_store_stays_bounded_with_max_age(self):
+        clock = _Clock(1_000.0)
+        verifier = EnvelopeVerifier("s", max_age_s=10, clock=clock)
+        for _ in range(100):
+            assert verifier.verify(_signed("s", issued_at=clock.now)) is True
+        assert verifier.remembered_nonces == 100
+        clock.now += 11
+        assert verifier.verify(_signed("s", issued_at=clock.now)) is True
+        assert verifier.remembered_nonces == 1
+
+    def test_nonce_forgotten_after_envelope_expiry(self):
+        clock = _Clock(1_000.0)
+        verifier = EnvelopeVerifier("s", clock=clock)
+        env = _signed("s", expires_at=1_030.0)
+        assert verifier.verify(env) is True
+        clock.now = 1_031.0
+        assert verifier.verify(env) is False  # expired
+        assert verifier.remembered_nonces == 0
+
+    def test_nonce_without_expiry_or_max_age_is_kept(self):
+        clock = _Clock(1_000.0)
+        verifier = EnvelopeVerifier("s", clock=clock)
+        env = _signed("s")
+        assert verifier.verify(env) is True
+        clock.now += 1_000_000
+        assert verifier.verify(env) is False
+        assert verifier.remembered_nonces == 1
+
+    def test_invalid_freshness_settings_raise(self):
+        with pytest.raises(ValueError):
+            EnvelopeVerifier("s", max_age_s=0)
+        with pytest.raises(ValueError):
+            EnvelopeVerifier("s", clock_skew_s=-1)
