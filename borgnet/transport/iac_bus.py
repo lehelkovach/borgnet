@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
 from borgnet.logging import get_logger
 
 _log = get_logger("transport.iac_bus")
+
+
+def _http_error_details(error: requests.exceptions.HTTPError) -> Tuple[Any, str]:
+    """Return ``(status_code, body_excerpt)`` for logging an HTTP error.
+
+    A ``requests.Response`` is falsy for 4xx/5xx statuses, so the response must
+    be compared against ``None`` explicitly. A truthiness check such as
+    ``if error.response`` always reports "N/A" for exactly the errors we log.
+    """
+    response = error.response
+    if response is None:
+        return "N/A", "N/A"
+    return response.status_code, response.text[:200]
 
 
 class IacBusClient:
@@ -75,8 +88,7 @@ class IacBusClient:
             _log.error(
                 "POST HTTP error: url=%s status=%s response=%s",
                 url,
-                e.response.status_code if e.response is not None else "N/A",
-                e.response.text[:200] if e.response is not None else "N/A",
+                *_http_error_details(e),
             )
             raise
 
@@ -134,8 +146,7 @@ class IacBusClient:
             _log.error(
                 "GET HTTP error: url=%s status=%s response=%s",
                 url,
-                e.response.status_code if e.response is not None else "N/A",
-                e.response.text[:200] if e.response is not None else "N/A",
+                *_http_error_details(e),
             )
             raise
 
@@ -203,8 +214,7 @@ class IacBusClient:
             _log.error(
                 "ENQUEUE HTTP error: url=%s status=%s response=%s",
                 url,
-                e.response.status_code if e.response else "N/A",
-                e.response.text[:200] if e.response else "N/A",
+                *_http_error_details(e),
             )
             raise
 
@@ -270,8 +280,7 @@ class IacBusClient:
             _log.error(
                 "CLAIM HTTP error: url=%s status=%s response=%s",
                 url,
-                e.response.status_code if e.response else "N/A",
-                e.response.text[:200] if e.response else "N/A",
+                *_http_error_details(e),
             )
             raise
 
@@ -334,8 +343,7 @@ class IacBusClient:
             _log.error(
                 "ACK HTTP error: url=%s status=%s response=%s",
                 url,
-                e.response.status_code if e.response else "N/A",
-                e.response.text[:200] if e.response else "N/A",
+                *_http_error_details(e),
             )
             raise
 
@@ -406,8 +414,7 @@ class IacBusClient:
             _log.error(
                 "NACK HTTP error: url=%s status=%s response=%s",
                 url,
-                e.response.status_code if e.response else "N/A",
-                e.response.text[:200] if e.response else "N/A",
+                *_http_error_details(e),
             )
             raise
 

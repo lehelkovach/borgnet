@@ -5,7 +5,8 @@ Enqueues N tasks, runs a pool of workers where one dies mid-lease after its
 first claim, and verifies that every task completes exactly once (the
 orphaned task is recovered by a surviving worker after lease expiry).
 
-Exits 0 when all tasks completed exactly once, 1 otherwise.
+Exits 0 when all tasks completed exactly once and the dying worker's task
+was recovered by a survivor, 1 otherwise.
 """
 
 import argparse
@@ -65,18 +66,20 @@ def main() -> int:
     print(f"duplicates:         {result['duplicates']}")
     print(f"dead_worker_claimed:{result['dead_worker_claimed']}")
     print(f"recovered_task_ids: {result['recovered_task_ids']}")
+    print(f"recovery_verified:  {result['recovery_verified']}")
+    print(f"worker_errors:      {result['worker_errors']}")
     print(f"elapsed:            {result['elapsed']}s")
     print(f"result:             {'SUCCESS' if result['success'] else 'FAILURE'}")
 
-    if result["success"] and result["recovered_task_ids"]:
+    if result["success"]:
         print(
             "kill-recovery verified: task(s) claimed by the dying worker were "
             "re-claimed and completed by survivors after lease expiry"
         )
-    elif result["success"]:
+    elif not result["dead_worker_claimed"]:
         print(
-            "warning: all tasks completed but the dying worker never claimed "
-            "a task, so kill-recovery was not exercised"
+            "failure: the dying worker never claimed a task, so kill-recovery "
+            "was not exercised"
         )
 
     return 0 if result["success"] else 1

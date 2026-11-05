@@ -9,6 +9,7 @@ from borgnet.sim import Agent, Simulation, Task
 from borgnet.stigmergy import DemandMap, DemandSignal
 from borgnet.memetic import Strategy, StrategyPool
 from borgnet.security import (
+    EnvelopeVerifier,
     QuorumManager,
     SignedEnvelope,
     TrustRegistry,
@@ -31,6 +32,7 @@ __all__ = [
     "DemandSignal",
     "Strategy",
     "StrategyPool",
+    "EnvelopeVerifier",
     "QuorumManager",
     "SignedEnvelope",
     "TrustRegistry",

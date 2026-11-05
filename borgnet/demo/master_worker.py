@@ -16,6 +16,8 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+import requests
+
 from borgnet.logging import get_logger
 from borgnet.transport.iac_bus import IacBusClient
 
@@ -116,6 +118,11 @@ class Worker:
 
     With ``die_after_claim=True`` the worker claims a single task and then
     exits WITHOUT acking, leaving the lease to expire on the bus.
+
+    Bus errors never kill the worker thread. A failed claim is retried after
+    ``poll_interval_s``. A failed ack means the lease was lost (it expired or
+    another worker re-claimed the task), so the task is not reported as done.
+    Each such error increments :attr:`errors`.
     """
 
     def __init__(
@@ -144,6 +151,7 @@ class Worker:
         self.claimed_task_ids: List[str] = []
         self.completed_task_ids: List[str] = []
         self.died = False
+        self.errors = 0
         _log.debug(
             "Worker initialized: id=%s queue=%s die_after_claim=%s",
             worker_id,
@@ -156,17 +164,31 @@ class Worker:
         if self.start_delay_s:
             time.sleep(self.start_delay_s)
         while not self.stop_event.is_set():
-            claimed = self.client.claim(
-                queue=self.queue,
-                worker=self.worker_id,
-                lease_seconds=self.lease_seconds,
-            )
+            try:
+                claimed = self.client.claim(
+                    queue=self.queue,
+                    worker=self.worker_id,
+                    lease_seconds=self.lease_seconds,
+                )
+            except requests.exceptions.RequestException as exc:
+                self.errors += 1
+                _log.warning(
+                    "Worker %s claim failed, retrying: %s", self.worker_id, exc
+                )
+                self.stop_event.wait(self.poll_interval_s)
+                continue
             if claimed is None:
-                time.sleep(self.poll_interval_s)
+                self.stop_event.wait(self.poll_interval_s)
                 continue
 
-            message_id = claimed["id"]
-            lease_id = claimed["lease_id"]
+            message_id = claimed.get("id")
+            lease_id = claimed.get("lease_id")
+            if not message_id or not lease_id:
+                self.errors += 1
+                _log.warning(
+                    "Worker %s ignoring malformed claim: %r", self.worker_id, claimed
+                )
+                continue
             body = claimed.get("message") or {}
             task_id = body.get("task_id", message_id) if isinstance(body, dict) else message_id
             self.claimed_message_ids.append(message_id)
@@ -185,25 +207,46 @@ class Worker:
                 return
 
             time.sleep(self.work_seconds)
-            self.client.ack(
-                queue=self.queue,
-                worker=self.worker_id,
-                message_id=message_id,
-                lease_id=lease_id,
-            )
+            try:
+                self.client.ack(
+                    queue=self.queue,
+                    worker=self.worker_id,
+                    message_id=message_id,
+                    lease_id=lease_id,
+                )
+            except requests.exceptions.RequestException as exc:
+                self.errors += 1
+                _log.warning(
+                    "Worker %s ack failed, lease lost: task=%s message_id=%s error=%s",
+                    self.worker_id,
+                    task_id,
+                    message_id,
+                    exc,
+                )
+                continue
             self.completed_task_ids.append(task_id)
-            self.client.post_message(
-                channel=self.results_channel,
-                sender=self.worker_id,
-                message=json.dumps(
-                    {
-                        "task_id": task_id,
-                        "message_id": message_id,
-                        "worker": self.worker_id,
-                        "lease_id": lease_id,
-                    }
-                ),
-            )
+            try:
+                self.client.post_message(
+                    channel=self.results_channel,
+                    sender=self.worker_id,
+                    message=json.dumps(
+                        {
+                            "task_id": task_id,
+                            "message_id": message_id,
+                            "worker": self.worker_id,
+                            "lease_id": lease_id,
+                        }
+                    ),
+                )
+            except requests.exceptions.RequestException as exc:
+                self.errors += 1
+                _log.error(
+                    "Worker %s acked task=%s but could not report completion: %s",
+                    self.worker_id,
+                    task_id,
+                    exc,
+                )
+                continue
             _log.info(
                 "Worker %s completed task=%s message_id=%s",
                 self.worker_id,
@@ -232,7 +275,10 @@ def run_demo(
     orphaned task, and that all tasks complete exactly once.
 
     Returns a dict with ``tasks_completed``, ``duplicates``,
-    ``recovered_task_ids``, ``elapsed``, and ``success``.
+    ``recovered_task_ids``, ``recovery_verified``, ``worker_errors``,
+    ``elapsed``, and ``success``. ``success`` requires every task to complete
+    exactly once AND the doomed worker's task to be recovered by a survivor,
+    so a run in which the kill was never exercised does not count.
     """
     if deadline_s is None:
         deadline_s = max(30.0, lease_seconds * 4 + num_tasks * work_seconds * 2)
@@ -308,6 +354,9 @@ def run_demo(
         for task_id in dead_worker.claimed_task_ids
         if task_id in completed_by_survivors
     )
+    recovery_verified = bool(dead_worker.claimed_task_ids) and (
+        recovered_task_ids == sorted(dead_worker.claimed_task_ids)
+    )
 
     result = {
         "tasks_completed": len(master.completions),
@@ -315,11 +364,14 @@ def run_demo(
         "duplicates": master.duplicates,
         "recovered_task_ids": recovered_task_ids,
         "dead_worker_claimed": list(dead_worker.claimed_task_ids),
+        "recovery_verified": recovery_verified,
+        "worker_errors": sum(w.errors for w in workers),
         "elapsed": round(elapsed, 2),
         "success": (
             all_done
             and len(master.completions) == num_tasks
             and master.duplicates == 0
+            and recovery_verified
         ),
     }
     _log.info("Demo finished: %s", result)
