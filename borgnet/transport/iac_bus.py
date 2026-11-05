@@ -75,8 +75,8 @@ class IacBusClient:
             _log.error(
                 "POST HTTP error: url=%s status=%s response=%s",
                 url,
-                e.response.status_code if e.response else "N/A",
-                e.response.text[:200] if e.response else "N/A",
+                e.response.status_code if e.response is not None else "N/A",
+                e.response.text[:200] if e.response is not None else "N/A",
             )
             raise
 
@@ -134,8 +134,8 @@ class IacBusClient:
             _log.error(
                 "GET HTTP error: url=%s status=%s response=%s",
                 url,
-                e.response.status_code if e.response else "N/A",
-                e.response.text[:200] if e.response else "N/A",
+                e.response.status_code if e.response is not None else "N/A",
+                e.response.text[:200] if e.response is not None else "N/A",
             )
             raise
 

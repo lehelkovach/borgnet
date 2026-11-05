@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -32,10 +33,32 @@ class SignedEnvelope:
     payload: Dict[str, Any] = field(default_factory=dict)
     signature: Optional[str] = None
 
+    def _signing_bytes(self) -> bytes:
+        """Canonical, order-stable serialization of all integrity-relevant fields.
+
+        The signature must cover the ENTIRE envelope, not just a few header
+        fields, so that tampering with the payload, the provenance chain, or
+        the expiry is detected. Fields are sorted for a deterministic result.
+        """
+        canonical = {
+            "goal_id": self.goal_id,
+            "origin_id": self.origin_id,
+            "parent_goal_id": self.parent_goal_id,
+            "chain_of_custody": list(self.chain_of_custody),
+            "nonce": self.nonce,
+            "issued_at": self.issued_at,
+            "expires_at": self.expires_at,
+            "payload": self.payload,
+        }
+        return json.dumps(
+            canonical, sort_keys=True, separators=(",", ":"), default=str
+        ).encode()
+
     def compute_signature(self, secret: str) -> str:
-        """Compute HMAC-SHA256 signature."""
-        data = f"{self.goal_id}:{self.origin_id}:{self.nonce}:{self.issued_at}"
-        sig = hmac.new(secret.encode(), data.encode(), hashlib.sha256).hexdigest()
+        """Compute HMAC-SHA256 signature over the full envelope."""
+        sig = hmac.new(
+            secret.encode(), self._signing_bytes(), hashlib.sha256
+        ).hexdigest()
         self.signature = sig
         _log.debug(
             "Signature computed: goal=%s origin=%s sig=%s...",
@@ -46,9 +69,10 @@ class SignedEnvelope:
         return sig
 
     def verify_signature(self, secret: str) -> bool:
-        """Verify HMAC signature."""
-        data = f"{self.goal_id}:{self.origin_id}:{self.nonce}:{self.issued_at}"
-        expected = hmac.new(secret.encode(), data.encode(), hashlib.sha256).hexdigest()
+        """Verify the HMAC signature over the full envelope."""
+        expected = hmac.new(
+            secret.encode(), self._signing_bytes(), hashlib.sha256
+        ).hexdigest()
         valid = hmac.compare_digest(self.signature or "", expected)
         if valid:
             _log.debug("Signature verified: goal=%s origin=%s", self.goal_id, self.origin_id)
@@ -73,6 +97,42 @@ class SignedEnvelope:
                 time.time(),
             )
         return expired
+
+
+class EnvelopeVerifier:
+    """Stateful verifier enforcing signature, expiry, and replay protection.
+
+    A valid signature alone does not make an envelope safe to act on: a
+    captured envelope can be replayed verbatim, and its signature still
+    verifies. This verifier rejects an envelope whose signature is invalid,
+    whose expiry has passed, or whose nonce has already been accepted.
+    """
+
+    def __init__(self, secret: str):
+        self._secret = secret
+        self._seen_nonces: Set[str] = set()
+
+    def verify(self, envelope: "SignedEnvelope") -> bool:
+        """Return True only for a fresh, unexpired, correctly signed envelope."""
+        if not envelope.verify_signature(self._secret):
+            return False
+        if envelope.is_expired():
+            _log.warning(
+                "Envelope rejected (expired): goal=%s origin=%s",
+                envelope.goal_id,
+                envelope.origin_id,
+            )
+            return False
+        if envelope.nonce in self._seen_nonces:
+            _log.warning(
+                "Envelope rejected (replayed nonce): goal=%s origin=%s nonce=%s",
+                envelope.goal_id,
+                envelope.origin_id,
+                envelope.nonce,
+            )
+            return False
+        self._seen_nonces.add(envelope.nonce)
+        return True
 
 
 @dataclass
