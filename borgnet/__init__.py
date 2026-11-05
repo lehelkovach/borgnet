@@ -16,6 +16,7 @@ from borgnet.security import (
     TrustScore,
 )
 from borgnet.agent import AgentRunner, StepResult, StubWorker, Worker
+from borgnet.propagation import AdoptionPolicy, PeerExchange, StrategyOffer
 
 __all__ = [
     "configure_logging",
@@ -41,4 +42,7 @@ __all__ = [
     "StepResult",
     "StubWorker",
     "Worker",
+    "AdoptionPolicy",
+    "PeerExchange",
+    "StrategyOffer",
 ]
