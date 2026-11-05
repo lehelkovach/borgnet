@@ -1,0 +1,11 @@
+{
+  "name": "borgnet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Task runner for BorgNet. The project is Python; npm only runs the scripts below and installs nothing.",
+  "scripts": {
+    "test": "scripts/ci.sh local",
+    "test:host": "python3 -m pytest",
+    "build:images": "scripts/ci.sh build"
+  }
+}

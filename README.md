@@ -99,35 +99,26 @@ logic also runs offline against an in-memory fake bus in
 answers at `BUS_URL` (default `http://127.0.0.1:8091`), with an optional
 `BUS_API_TOKEN`.
 
-CI runs in OCI containers, not on GitHub. `scripts/ci.sh` builds one test
-image per Python version from `Containerfile` and runs the suite in each. It
-works with Podman or Docker and exits non-zero if any version fails.
+CI runs in OCI containers through npm, not on GitHub. `npm test` builds one
+test image per Python version from `Containerfile`, runs the suite in each,
+and fails if any version fails. It needs Node.js and either Podman or Docker,
+but no local Python packages. npm installs nothing for this project.
+
+| Command | What it does |
+|---|---|
+| `npm test` | Build the images and run the suite on Python 3.10 through 3.13 |
+| `npm run test:host` | Run the suite with the Python on your `PATH`, without containers |
+| `npm run build:images` | Build the images only, and push them when `REGISTRY` is set |
+
+Settings are environment variables, for example:
 
 ```bash
-scripts/ci.sh local    # build the images and run the tests on this machine
-scripts/ci.sh build    # build only, and push when REGISTRY is set
-scripts/ci.sh nomad    # build, push, run on Nomad, wait, and print the logs
+PYTHON_VERSIONS=3.12 npm test
+BUS_URL=http://127.0.0.1:8091 CONTAINER_NETWORK=host npm test
+REGISTRY=registry.example.com:5000 npm run build:images
 ```
 
-On Nomad, [`deploy/nomad/borgnet-ci.nomad.hcl`](deploy/nomad/borgnet-ci.nomad.hcl)
-is a parameterized batch job with one task group per Python version. The
-script registers it, dispatches a run tagged with the current git commit,
-waits for every group, and prints each group's test output. Failed runs are
-not retried.
-
-The Nomad clients need the `docker` or `podman` driver and must be able to get
-the images. Set `REGISTRY` to push them to a registry the clients can pull
-from, or leave it unset when the clients share the build machine's container
-engine.
-
-```bash
-REGISTRY=registry.service.consul:5000 \
-NOMAD_ADDR=http://nomad.service.consul:4646 \
-  scripts/ci.sh nomad
-```
-
-The top of `scripts/ci.sh` lists every setting, including the Python
-versions, the Nomad driver, and an optional bus URL for live tests.
+The top of `scripts/ci.sh` lists every setting.
 
 ## Documentation
 

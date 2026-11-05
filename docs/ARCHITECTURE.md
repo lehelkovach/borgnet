@@ -19,10 +19,9 @@ borgnet/
   demo/master_worker.py  Master/workers kill-recovery demo over the bus
 scripts/
   demo_master_workers.py  CLI for the demo
-  ci.sh                   Container CI: build test images, run them locally or on Nomad
+  ci.sh                   Container CI: build test images and run them
 Containerfile           OCI test image, one per Python version
-deploy/nomad/
-  borgnet-ci.nomad.hcl  Parameterized Nomad batch job that runs the test images
+package.json            npm scripts that run CI; no npm dependencies
 ```
 
 Every module logs through `borgnet.logging.get_logger("<module>")`, which

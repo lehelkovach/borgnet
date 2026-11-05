@@ -4,8 +4,8 @@
 #   docker build -f Containerfile --build-arg PYTHON_VERSION=3.12 -t borgnet-tests:py3.12 .
 #   docker run --rm borgnet-tests:py3.12
 #
-# scripts/ci.sh builds one image per supported Python version and can run them
-# locally or on Nomad (deploy/nomad/borgnet-ci.nomad.hcl).
+# `npm test` runs scripts/ci.sh, which builds one image per supported Python
+# version and runs the suite in each.
 
 ARG PYTHON_VERSION=3.12
 FROM docker.io/library/python:${PYTHON_VERSION}-slim
