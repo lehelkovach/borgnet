@@ -8,7 +8,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set
 
 from borgnet.logging import get_logger
 
@@ -150,19 +150,46 @@ class QuorumManager:
     Manage quorum-based approvals for high-impact actions.
 
     Proposals require N-of-M votes before committing.
+
+    Pass ``voters`` to fix the electorate: only those ids may vote, and
+    ``total_voters`` becomes the roster size. Without a roster, any voter id is
+    accepted until ``total_voters`` distinct ids have voted on a proposal. That
+    bounds the vote count but cannot stop made-up (Sybil) ids, so use a roster
+    for anything that matters. Once a proposal is committed or rejected it is
+    final: further votes are ignored and the opposite decision is refused.
     """
 
-    def __init__(self, required_votes: int = 2, total_voters: int = 3):
+    def __init__(
+        self,
+        required_votes: int = 2,
+        total_voters: int = 3,
+        voters: Optional[Iterable[str]] = None,
+    ):
+        self.voters: Optional[FrozenSet[str]] = (
+            frozenset(voters) if voters is not None else None
+        )
+        if self.voters is not None:
+            total_voters = len(self.voters)
+        if not 1 <= required_votes <= total_voters:
+            raise ValueError(
+                f"required_votes must be between 1 and total_voters ({total_voters}), "
+                f"got {required_votes}"
+            )
         self.required_votes = required_votes
         self.total_voters = total_voters
         self.proposals: Dict[str, Dict[str, Vote]] = {}
         self.committed: Set[str] = set()
         self.rejected: Set[str] = set()
         _log.debug(
-            "QuorumManager initialized: required=%d total=%d",
+            "QuorumManager initialized: required=%d total=%d roster=%s",
             required_votes,
             total_voters,
+            sorted(self.voters) if self.voters is not None else None,
         )
+
+    def is_final(self, proposal_id: str) -> bool:
+        """True once a proposal has been committed or rejected."""
+        return proposal_id in self.committed or proposal_id in self.rejected
 
     def create_proposal(self, proposal_id: str) -> None:
         """Create a new proposal awaiting votes."""
@@ -170,12 +197,41 @@ class QuorumManager:
             self.proposals[proposal_id] = {}
             _log.info("Proposal created: id=%s", proposal_id)
 
-    def vote(self, proposal_id: str, voter_id: str, approve: bool) -> None:
-        """Cast a vote on a proposal."""
+    def vote(self, proposal_id: str, voter_id: str, approve: bool) -> bool:
+        """Cast or change a vote. Returns False if the vote was not accepted.
+
+        A vote is refused when the proposal is already final, the voter is not
+        on the roster, or (without a roster) ``total_voters`` other ids have
+        already voted.
+        """
+        if self.is_final(proposal_id):
+            _log.warning(
+                "Vote ignored, proposal is final: proposal=%s voter=%s",
+                proposal_id,
+                voter_id,
+            )
+            return False
+        if self.voters is not None and voter_id not in self.voters:
+            _log.warning(
+                "Vote ignored, voter not on roster: proposal=%s voter=%s",
+                proposal_id,
+                voter_id,
+            )
+            return False
+
         if proposal_id not in self.proposals:
             self.create_proposal(proposal_id)
+        votes = self.proposals[proposal_id]
+        if voter_id not in votes and len(votes) >= self.total_voters:
+            _log.warning(
+                "Vote ignored, all %d voters have voted: proposal=%s voter=%s",
+                self.total_voters,
+                proposal_id,
+                voter_id,
+            )
+            return False
 
-        self.proposals[proposal_id][voter_id] = Vote(
+        votes[voter_id] = Vote(
             voter_id=voter_id, proposal_id=proposal_id, approve=approve
         )
         _log.info(
@@ -184,6 +240,7 @@ class QuorumManager:
             voter_id,
             approve,
         )
+        return True
 
     def tally(self, proposal_id: str) -> Dict[str, int]:
         """Count votes for a proposal."""
@@ -218,7 +275,10 @@ class QuorumManager:
         return rejected
 
     def commit(self, proposal_id: str) -> bool:
-        """Commit a proposal if quorum reached."""
+        """Commit a proposal if quorum reached and it was not already rejected."""
+        if proposal_id in self.rejected:
+            _log.warning("Commit refused, proposal was rejected: id=%s", proposal_id)
+            return False
         if self.is_quorum_reached(proposal_id):
             self.committed.add(proposal_id)
             _log.info("Proposal committed: id=%s", proposal_id)
@@ -227,7 +287,10 @@ class QuorumManager:
         return False
 
     def reject(self, proposal_id: str) -> bool:
-        """Reject a proposal if not enough votes possible."""
+        """Reject a proposal if quorum is unreachable and it was not committed."""
+        if proposal_id in self.committed:
+            _log.warning("Reject refused, proposal was committed: id=%s", proposal_id)
+            return False
         if self.is_rejected(proposal_id):
             self.rejected.add(proposal_id)
             _log.info("Proposal rejected: id=%s", proposal_id)

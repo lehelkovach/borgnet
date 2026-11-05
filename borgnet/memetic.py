@@ -51,12 +51,14 @@ class Strategy:
         for key in self.params:
             if random.random() < mutation_rate:
                 old_val = self.params[key]
-                if isinstance(old_val, float):
+                # bool must be checked before int: bool is a subclass of int,
+                # so an int branch first would turn True into 0, 1, or 2.
+                if isinstance(old_val, bool):
+                    self.params[key] = not old_val
+                elif isinstance(old_val, float):
                     self.params[key] = old_val * random.uniform(0.8, 1.2)
                 elif isinstance(old_val, int):
                     self.params[key] = max(0, old_val + random.randint(-1, 1))
-                elif isinstance(old_val, bool):
-                    self.params[key] = not old_val
                 mutations.append((key, old_val, self.params[key]))
 
         if mutations:

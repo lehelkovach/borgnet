@@ -70,7 +70,7 @@ class Simulation:
 
         expired_count = 0
         for task in self.tasks.values():
-            if task.status == "running" and task.lease_expires_at:
+            if task.status == "running" and task.lease_expires_at is not None:
                 if self.now >= task.lease_expires_at:
                     _log.warning(
                         "Lease expired: task=%s owner=%s expires_at=%d now=%d",
@@ -112,12 +112,47 @@ class Simulation:
             task.lease_expires_at,
         )
 
-    def complete_task(self, task_id: str, success: bool = True) -> None:
+    def _check_lease(self, task: Task, action: str, agent_id: Optional[str]) -> bool:
+        """Return True if ``task`` holds a live lease that ``agent_id`` may act on.
+
+        Only a running task can be completed or requeued. When ``agent_id`` is
+        given it must be the current lease owner, so a worker whose lease
+        expired and was re-assigned cannot complete or drop the new owner's task.
+        """
+        if task.status != "running":
+            _log.warning(
+                "Cannot %s task not running: task=%s status=%s",
+                action,
+                task.task_id,
+                task.status,
+            )
+            return False
+        if agent_id is not None and agent_id != task.owner:
+            _log.warning(
+                "Cannot %s task leased to another agent: task=%s owner=%s caller=%s",
+                action,
+                task.task_id,
+                task.owner,
+                agent_id,
+            )
+            return False
+        return True
+
+    def complete_task(
+        self, task_id: str, success: bool = True, agent_id: Optional[str] = None
+    ) -> bool:
+        """Finish a running task. Returns False if the completion was rejected.
+
+        A task that is not running (already done, failed, or back in the queue
+        after lease expiry) is left unchanged, so it is never counted twice.
+        """
         if task_id not in self.tasks:
             _log.error("Cannot complete unknown task: task_id=%s", task_id)
             raise KeyError(f"Task not found: {task_id}")
 
         task = self.tasks[task_id]
+        if not self._check_lease(task, "complete", agent_id):
+            return False
         old_status = task.status
         old_owner = task.owner
 
@@ -141,25 +176,31 @@ class Simulation:
                 old_owner,
                 old_status,
             )
+        return True
 
-    def requeue_task(self, task_id: str) -> None:
+    def requeue_task(self, task_id: str, agent_id: Optional[str] = None) -> bool:
         """Return an owned/running task to the queue (self-healing requeue).
 
         Used when a worker dies mid-task: the lease is dropped and the task
         becomes available for a healthy peer, the same outcome lease expiry
         produces in :meth:`tick`, but without waiting for the lease to lapse.
+        Returns False, leaving the task unchanged, if it is not running or
+        ``agent_id`` is given and is not the lease owner.
         """
         if task_id not in self.tasks:
             _log.error("Cannot requeue unknown task: task_id=%s", task_id)
             raise KeyError(f"Task not found: {task_id}")
 
         task = self.tasks[task_id]
+        if not self._check_lease(task, "requeue", agent_id):
+            return False
         old_owner = task.owner
         task.status = "queued"
         task.owner = None
         task.lease_expires_at = None
         self.metrics.task_reassigned()
         _log.info("Task requeued: task=%s old_owner=%s", task_id, old_owner)
+        return True
 
     def get_queued_tasks(self) -> List[Task]:
         """Return all tasks in queued status."""

@@ -224,3 +224,60 @@ class TestTrustRegistry:
         snap = registry.snapshot()
         assert snap["agent_count"] == 2
         assert snap["quarantined_count"] == 0
+
+
+class TestQuorumIntegrity:
+    """Regression tests for quorum vote validation and finality."""
+
+    def test_roster_rejects_unknown_voters(self):
+        qm = QuorumManager(required_votes=2, voters=["a", "b", "c"])
+        assert qm.vote("p", "sybil-1", approve=True) is False
+        assert qm.vote("p", "sybil-2", approve=True) is False
+        assert qm.commit("p") is False
+        assert qm.vote("p", "a", approve=True) is True
+        assert qm.vote("p", "b", approve=True) is True
+        assert qm.commit("p") is True
+
+    def test_roster_sets_total_voters(self):
+        qm = QuorumManager(required_votes=3, voters=["a", "b", "c", "d"])
+        assert qm.total_voters == 4
+
+    def test_without_roster_vote_count_is_capped(self):
+        qm = QuorumManager(required_votes=2, total_voters=3)
+        for voter in ["a", "b", "c"]:
+            assert qm.vote("p", voter, approve=False) is True
+        assert qm.vote("p", "d", approve=False) is False
+        assert qm.tally("p")["total"] == 3
+
+    def test_existing_voter_can_change_vote_at_cap(self):
+        qm = QuorumManager(required_votes=2, total_voters=2)
+        qm.vote("p", "a", approve=False)
+        qm.vote("p", "b", approve=True)
+        assert qm.vote("p", "a", approve=True) is True
+        assert qm.commit("p") is True
+
+    def test_rejected_proposal_cannot_be_committed(self):
+        qm = QuorumManager(required_votes=2, voters=["a", "b", "c"])
+        qm.vote("p", "a", approve=False)
+        qm.vote("p", "b", approve=False)
+        assert qm.reject("p") is True
+        assert qm.vote("p", "c", approve=True) is False
+        assert qm.commit("p") is False
+        assert "p" not in qm.committed
+
+    def test_committed_proposal_cannot_be_rejected(self):
+        qm = QuorumManager(required_votes=2, voters=["a", "b", "c"])
+        qm.vote("p", "a", approve=True)
+        qm.vote("p", "b", approve=True)
+        assert qm.commit("p") is True
+        assert qm.vote("p", "c", approve=False) is False
+        assert qm.reject("p") is False
+        assert qm.is_final("p")
+
+    def test_invalid_required_votes_raises(self):
+        for required, total in [(0, 3), (4, 3)]:
+            try:
+                QuorumManager(required_votes=required, total_voters=total)
+                assert False, "expected ValueError"
+            except ValueError:
+                pass

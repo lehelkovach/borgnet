@@ -108,3 +108,13 @@ def test_strategy_pool_snapshot():
     snap = pool.snapshot()
     assert snap["count"] == 1
     assert snap["best_fitness"] == 5.0
+
+
+def test_mutate_bool_param_stays_bool():
+    # Regression: bool is a subclass of int, so bools used to take the int
+    # branch and become 0, 1, or 2 instead of being flipped.
+    for _ in range(50):
+        s = Strategy(params={"enabled": True, "depth": 3})
+        s.mutate(mutation_rate=1.0)
+        assert s.params["enabled"] is False
+        assert type(s.params["depth"]) is int
