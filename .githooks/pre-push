@@ -1,0 +1,46 @@
+#!/bin/sh
+# Pre-push hook: run the container CI (`npm test`) on every commit being
+# pushed, and block the push if any Python version fails.
+#
+# Opt in per clone:   npm run hooks:enable
+# Skip one push:      git push --no-verify
+# Opt out:            npm run hooks:disable
+#
+# Each commit is tested from a clean `git archive` export, so uncommitted
+# changes in the working tree cannot make a push pass.
+
+set -eu
+
+root=$(mktemp -d "${TMPDIR:-/tmp}/borgnet-ci.XXXXXX")
+trap 'rm -rf "$root"' EXIT INT TERM
+
+tested=" "
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # A deletion pushes no commit; its object id is all zeros.
+  case "$local_sha" in
+    *[!0]*) ;;
+    *) continue ;;
+  esac
+  case "$tested" in
+    *" $local_sha "*) continue ;;
+  esac
+  tested="$tested$local_sha "
+
+  short=$(git rev-parse --short "$local_sha")
+  dir="$root/$short"
+  mkdir -p "$dir"
+  git archive "$local_sha" | tar -x -C "$dir"
+
+  if [ ! -x "$dir/scripts/ci.sh" ] || [ ! -f "$dir/package.json" ]; then
+    echo "pre-push: $short ($local_ref) predates container CI, skipping"
+    continue
+  fi
+
+  echo "pre-push: running CI for $short ($local_ref)"
+  if ! (cd "$dir" && IMAGE_TAG="$short" npm test --silent); then
+    echo "pre-push: CI failed for $short. Fix it, or skip once with git push --no-verify." >&2
+    exit 1
+  fi
+done
+
+exit 0

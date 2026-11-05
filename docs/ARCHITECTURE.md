@@ -22,6 +22,7 @@ scripts/
   ci.sh                   Container CI: build test images and run them
 Containerfile           OCI test image, one per Python version
 package.json            npm scripts that run CI; no npm dependencies
+.githooks/pre-push      Opt-in hook that runs `npm test` before every push
 ```
 
 Every module logs through `borgnet.logging.get_logger("<module>")`, which

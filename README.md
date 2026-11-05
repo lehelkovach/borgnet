@@ -120,6 +120,22 @@ REGISTRY=registry.example.com:5000 npm run build:images
 
 The top of `scripts/ci.sh` lists every setting.
 
+### Run CI on every push
+
+A pre-push hook in `.githooks/pre-push` runs `npm test` on each commit you
+push and blocks the push if any Python version fails. It tests a clean export
+of the pushed commit, so uncommitted changes cannot make a push pass. It is
+off until you turn it on in your clone:
+
+| Command | What it does |
+|---|---|
+| `npm run hooks:enable` | Point git at `.githooks`, so every `git push` runs CI first |
+| `git push --no-verify` | Skip the hook for one push |
+| `npm run hooks:disable` | Turn the hook off again |
+
+Turning it on sets git's `core.hooksPath` for this clone only. That replaces
+any hooks you keep in `.git/hooks`.
+
 ## Documentation
 
 | Doc | What it covers |
