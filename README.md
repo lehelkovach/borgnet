@@ -1,89 +1,129 @@
 # BorgNet
 
-**BorgNet — Distributed Adaptive Memetic Hive for Goal‑Directed Agents**
+[![tests](https://github.com/lehelkovach/borgnet/actions/workflows/tests.yml/badge.svg)](https://github.com/lehelkovach/borgnet/actions/workflows/tests.yml)
 
-## What it is
-BorgNet is a research‑oriented framework for building distributed, goal‑directed
-agent swarms that adapt over time, propagate successful strategies (memes), and
-remain resilient under failure or adversarial conditions.
+BorgNet is a research prototype for coordinating a swarm of goal-directed
+agents without a central scheduler. Agents pick work through a shared demand
+signal (stigmergy), hold tasks under expiring leases so a dead agent's work is
+recovered, spread successful strategies through an evolving pool (memetics),
+and are scored for trust so misbehaving agents can be quarantined.
 
-## Why it exists
-Centralized orchestration struggles with scale, resilience, and heterogeneous
-tools. BorgNet explores a hybrid hierarchical‑mesh model where global objectives
-are decomposed into subgoals and executed by a self‑organizing swarm.
+It is early-stage research code. Some parts of the design below are
+implemented and tested; others are still plans. The status table says which
+is which.
 
-## How it works (high level)
-- A **control plane** maintains the global goal DAG and resource budgets.
-- An **agent mesh** bids on subgoals and self‑assigns via leases.
-- A **stigmergic demand map** signals where attention is needed.
-- **Memetic adaptation** spreads successful strategies across agents.
-- **Resilience policies** requeue tasks and isolate suspicious nodes.
+## Status
 
-## Goal Requirements
-- Global objective defined as a DAG of subgoals
-- Clear success metrics (throughput, uptime, resilience)
-- Resource budgets (compute, spawn count, time)
-- Safety constraints (auth, approval thresholds)
-- Progress visibility (state + audit trail)
-- Failover rules (requeue, redundancy, timeout)
+| Capability | Status | Where |
+|---|---|---|
+| Task leases, expiry, and requeue in a simulated clock | Implemented | `borgnet/sim.py` |
+| Single-agent loop: select, claim, execute, report | Implemented | `borgnet/agent.py` |
+| Stigmergic demand map with deposit and evaporation | Implemented | `borgnet/stigmergy.py` |
+| Strategy pool with fitness, selection, mutation, evolution | Implemented | `borgnet/memetic.py` |
+| HMAC-signed envelopes over the full envelope, expiry, replay rejection | Implemented, shared secret only | `borgnet/security.py` |
+| N-of-M quorum voting with optional voter roster | Implemented | `borgnet/security.py` |
+| Trust scores and quarantine | Implemented | `borgnet/security.py` |
+| Throughput and failure counters | Implemented | `borgnet/metrics.py` |
+| IAC Bus HTTP client: messages and queue leasing | Implemented | `borgnet/transport/iac_bus.py` |
+| Master/workers kill-recovery demo over a live bus | Implemented, needs an IAC Bus with queue endpoints | `borgnet/demo/` |
+| Message envelope schemas | Defined, not yet used by other modules | `borgnet/models.py` |
+| Peer-to-peer strategy transmission between agents | Planned | roadmap item 2 |
+| Goal DAG and control plane | Planned | roadmap |
+| Contract-net bidding for delegation | Planned | roadmap |
+| Heartbeats and presence | Planned | roadmap |
+| Spawn budgets and agent TTL | Planned | roadmap |
+| Per-agent signing keys | Planned | roadmap |
+| NATS or Redis Streams transport | Planned | roadmap |
+| Reinforcement learning (central training, decentralized execution) | Planned | roadmap |
 
-## Implementation Patterns
-- Goal DAG + leases for task ownership
-- Contract‑net bidding for delegation
-- Quorum approvals for high‑impact actions
-- Stigmergic demand map for dynamic task selection
-- Memetic propagation of successful strategies
-- CTDE RL (central training, decentralized execution)
-- Anomaly detection + trust scoring for resilience
-- Spawn budgets + TTL for controlled growth
+The roadmap lives in [`docs/DEV_PLAN.md`](docs/DEV_PLAN.md).
 
-## Solutions It Provides
-- Scales coordination without centralized bottlenecks
-- Survives node failures through leases and redundancy
-- Adaptive specialization based on workload and performance
-- Secure goal propagation with provenance and quorum checks
-- Controlled growth to prevent runaway resource use
-- Faster recovery via self‑healing requeue mechanisms
-- Distributed planning across heterogeneous tools/resources
-- Auditable decision trail for accountability and debugging
+## Quick start
 
-## Current Modules
-- **Simulation** (`borgnet/sim.py`) — task leasing, requeue, agent loop
-- **Metrics** (`borgnet/metrics.py`) — throughput, failure, resilience tracking
-- **Stigmergy** (`borgnet/stigmergy.py`) — demand map for decentralized task selection
-- **Memetic** (`borgnet/memetic.py`) — strategy pool with evolution and propagation
-- **Security** (`borgnet/security.py`) — signed envelopes, quorum voting, trust scoring
-- **Models** (`borgnet/models.py`) — Pydantic message/task/presence schemas
-- **Transport** (`borgnet/transport/iac_bus.py`) — IAC Bus HTTP adapter with queue leasing (enqueue/claim/ack/nack)
-- **Demo** (`borgnet/demo/master_worker.py`) — master/workers kill-recovery demo over live bus queues
-
-## Tests
-- 75 unit and integration tests
-- Run with `pytest -v`
-- Live transport and demo tests require running IAC bus (`BUS_URL` env var)
-
-## Quick Start
 ```bash
-# Clone
 git clone https://github.com/lehelkovach/borgnet.git
 cd borgnet
 
-# Create venv and install deps
 python3 -m venv .venv
-./.venv/bin/pip install pydantic requests networkx pytest pytest-cov
+./.venv/bin/pip install -e . pytest pytest-cov
 
-# Run tests
-./.venv/bin/pytest -v
+./.venv/bin/pytest
+```
 
-# Master/workers kill-recovery demo (requires a running IAC bus):
-# one worker dies mid-lease and a survivor recovers its task after expiry
+BorgNet needs Python 3.10 or newer. CI runs the suite on 3.10 through 3.13.
+
+### Run one agent in-process
+
+```python
+from borgnet import (
+    Agent, AgentRunner, DemandMap, Simulation, Strategy, StrategyPool,
+    StubWorker, Task, TrustRegistry,
+)
+
+sim = Simulation()
+agent = Agent(agent_id="a1")
+sim.add_agent(agent)
+for i in range(3):
+    sim.add_task(Task(task_id=f"t{i}", task_type="build", lease_ttl=30))
+
+pool = StrategyPool()
+pool.add_strategy(Strategy(params={"temperature": 1.0}))
+
+runner = AgentRunner(agent, sim, pool, DemandMap(), TrustRegistry(), StubWorker())
+for step in runner.run():
+    print(step.outcome, step.task_id)
+print(sim.metrics.summary())
+```
+
+`StubWorker` returns a fixed fitness. A real backend implements the `Worker`
+protocol in `borgnet/agent.py` and is passed in the same way.
+
+### Kill-recovery demo over a live IAC Bus
+
+The demo enqueues tasks, starts several workers, and kills one right after it
+claims a task. It succeeds only if every task completes exactly once and a
+surviving worker finishes the killed worker's task after its lease expires.
+
+```bash
 ./.venv/bin/python scripts/demo_master_workers.py \
   --bus-url http://127.0.0.1:8091 --token devtoken \
   --tasks 8 --workers 3 --lease-seconds 5
 ```
 
-## Repository Docs
-- `docs/DEV_PLAN.md` — roadmap and milestones
-- `docs/PROTOCOL.md` — message envelope and performatives
-- `docs/THREAT_MODEL.md` — adversarial assumptions and mitigations
-- `docs/REFERENCES.md` — benign systems and protocols to adapt
+This needs an IAC Bus that serves the queue endpoints
+`/bus/queues/claim`, `/bus/queues/ack`, and `/bus/queues/nack`. The same demo
+logic also runs offline against an in-memory fake bus in
+`tests/test_demo_offline.py`.
+
+## Tests
+
+- `pytest` runs everything. Live bus tests skip themselves unless an IAC Bus
+  answers at `BUS_URL` (default `http://127.0.0.1:8091`), with an optional
+  `BUS_API_TOKEN`.
+- GitHub Actions runs the suite on every pull request and on pushes to
+  `master`.
+
+## Documentation
+
+| Doc | What it covers |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Module-by-module reference, the agent step cycle, lease and quorum rules, and why the design uses stigmergy |
+| [`docs/DEV_PLAN.md`](docs/DEV_PLAN.md) | Milestones with status and the numbered roadmap |
+| [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | Draft message envelope and performatives, and how far the code follows it |
+| [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) | Adversarial assumptions, threats, and the status of each mitigation |
+| [`docs/REFERENCES.md`](docs/REFERENCES.md) | Benign systems and protocols the design borrows from |
+
+## Design goals
+
+These describe where the project is heading. See the status table for what
+exists today.
+
+- A control plane holds the global goal as a DAG of subgoals, with resource
+  budgets and spawn limits.
+- An agent mesh bids on subgoals and self-assigns work through leases.
+- A stigmergic demand map signals where attention is needed.
+- Memetic adaptation spreads successful strategies across agents.
+- Resilience policies requeue work from failed agents and isolate suspicious
+  ones.
+- High-impact actions need quorum approval, and every goal carries signed
+  provenance.

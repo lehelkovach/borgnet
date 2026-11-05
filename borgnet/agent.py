@@ -1,7 +1,7 @@
 """Single-agent worker loop wiring the swarm primitives together.
 
-This is roadmap item 1: a minimal running agent that ties the existing
-primitives into one loop. One agent observes queued work, reinforces the
+This is roadmap item 1 in ``docs/DEV_PLAN.md``: a minimal running agent that
+ties the existing primitives into one loop. One agent observes queued work, reinforces the
 stigmergic demand map, claims a task lease, selects a strategy from the pool,
 executes the task via a pluggable :class:`Worker`, reports the outcome, and
 updates its trust score accordingly. A worker that raises mid-task (a "dead"
@@ -9,7 +9,7 @@ worker) requeues the task for a healthy peer.
 
 Scope: this is deliberately a *single-agent* loop. Peer-to-peer strategy
 transmission between agents (the trust-gated horizontal channel) is roadmap
-item 2 and is intentionally not implemented here. The :class:`Worker` backend
+item 2 in ``docs/DEV_PLAN.md`` and is intentionally not implemented here. The :class:`Worker` backend
 is an injected dependency; this module makes no network calls of its own.
 """
 
