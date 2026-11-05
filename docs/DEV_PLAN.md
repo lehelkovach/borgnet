@@ -30,12 +30,13 @@ Status values: **Done**, **Partial**, **Not started**.
 | Task lease handling and requeue | Done | `sim.py` |
 | Stigmergic demand map | Done | `stigmergy.py`, with evaporation |
 | Memetic strategy pool | Done | `memetic.py` |
-| Strategy propagation between agents | Not started | Roadmap item 2 |
+| Strategy propagation between agents | Done | In-process, trust-gated, `propagation.py` (roadmap item 2) |
 
 ### 3) Resilience and adversarial tests — Partial
 | Item | Status | Notes |
 |---|---|---|
 | Node failure injection | Done | Worker death in agent tests; kill-recovery demo, offline and live |
+| Failure detection by heartbeat | Done | Simulation presence TTL (roadmap item 7) |
 | Malicious or corrupted agent simulation | Not started | Trust and quarantine are unit-tested only |
 | Metrics: task completion | Done | `metrics.py` |
 | Metrics: recovery time, anomaly false-positive rate | Not started | Roadmap item 8 |
@@ -56,20 +57,26 @@ Numbered so code and commits can refer to items. Items are roughly in order.
 1. **Single-agent worker loop.** Done. One agent selects work from the demand
    map, claims a lease, runs a pluggable worker, and reports to trust and the
    strategy pool. See `borgnet/agent.py`.
-2. **Peer-to-peer strategy transmission.** Not started. A trust-gated
-   horizontal channel through which agents share and adopt strategies, so
-   memes spread between agents and not only within one pool.
+2. **Peer-to-peer strategy transmission.** Done, in-process. Agents keep
+   their own pools and share through a trust-gated `PeerExchange`; adopted
+   strategies start with discounted fitness. See `borgnet/propagation.py`.
+   Carrying offers over the bus is part of item 3.
 3. **Wire the protocol through the transport.** Not started. Send
    `MessageEnvelope` and `SignedEnvelope` over the bus instead of plain
-   strings, and validate performatives and priorities against the spec.
-4. **Stronger signing.** Not started. Per-agent signing keys, signed quorum
-   votes, and a persistent nonce store that prunes expired nonces.
+   strings, validate performatives and priorities against the spec, and carry
+   heartbeats and strategy offers between processes.
+4. **Stronger signing.** Partial. Done: per-origin HMAC keys, a maximum
+   envelope age, and a nonce store that forgets nonces once replays would
+   fail anyway. Remaining: asymmetric signatures, signed quorum votes, and a
+   persistent nonce store.
 5. **Goal DAG and control plane.** Not started. Global goal decomposed into a
    DAG of subgoals with `networkx`, plus resource and spawn budgets.
 6. **Contract-net bidding.** Not started. Request, propose, and agree flow
    for delegating subgoals.
-7. **Heartbeats and presence.** Not started. Agents announce presence with a
-   TTL so peers can detect failures.
+7. **Heartbeats and presence.** Done in the simulation. Agents that miss
+   their heartbeats are dropped and their tasks requeued before leases
+   expire. See `Simulation(presence_ttl=...)`. Heartbeats over the bus are
+   part of item 3.
 8. **Scenario suites and evaluation.** Not started. Multi-agent runs with node
    loss, partitions, malicious agents, and backlog spikes. Measure recovery
    time, throughput, and anomaly false-positive rate, and compare stigmergic
@@ -93,10 +100,10 @@ Numbered so code and commits can refer to items. Items are roughly in order.
 ## Safety and Governance
 | Control | Status |
 |---|---|
-| Signed goal envelopes and chain of custody | Done, shared secret only |
-| Replay rejection by nonce | Done, in-memory only |
+| Signed goal envelopes and chain of custody | Done; one shared key or per-origin keys |
+| Replay rejection by nonce | Done; bounded with a maximum age, in memory only |
 | Quorum approval for critical actions | Done, with optional voter roster |
-| Lease and heartbeat timeouts for self-healing | Leases done; heartbeats not started |
+| Lease and heartbeat timeouts for self-healing | Done in the simulation |
 | Spawn budgets to prevent uncontrolled growth | Not started |
 
 ## Reference Systems to Adapt (benign)

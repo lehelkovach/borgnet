@@ -15,22 +15,24 @@ is which.
 | Capability | Status | Where |
 |---|---|---|
 | Task leases, expiry, and requeue in a simulated clock | Implemented | `borgnet/sim.py` |
+| Heartbeats: silent agents dropped and their tasks requeued early | Implemented in the simulation | `borgnet/sim.py` |
 | Single-agent loop: select, claim, execute, report | Implemented | `borgnet/agent.py` |
 | Stigmergic demand map with deposit and evaporation | Implemented | `borgnet/stigmergy.py` |
 | Strategy pool with fitness, selection, mutation, evolution | Implemented | `borgnet/memetic.py` |
-| HMAC-signed envelopes over the full envelope, expiry, replay rejection | Implemented, shared secret only | `borgnet/security.py` |
+| Trust-gated strategy sharing between agents | Implemented, in-process | `borgnet/propagation.py` |
+| HMAC-signed envelopes over the full envelope, expiry, replay rejection | Implemented | `borgnet/security.py` |
+| Per-agent signing keys and bounded replay memory | Implemented, symmetric keys | `borgnet/security.py` |
 | N-of-M quorum voting with optional voter roster | Implemented | `borgnet/security.py` |
 | Trust scores and quarantine | Implemented | `borgnet/security.py` |
 | Throughput and failure counters | Implemented | `borgnet/metrics.py` |
 | IAC Bus HTTP client: messages and queue leasing | Implemented | `borgnet/transport/iac_bus.py` |
 | Master/workers kill-recovery demo over a live bus | Implemented, needs an IAC Bus with queue endpoints | `borgnet/demo/` |
 | Message envelope schemas | Defined, not yet used by other modules | `borgnet/models.py` |
-| Peer-to-peer strategy transmission between agents | Planned | roadmap item 2 |
 | Goal DAG and control plane | Planned | roadmap |
 | Contract-net bidding for delegation | Planned | roadmap |
-| Heartbeats and presence | Planned | roadmap |
+| Heartbeats and strategy sharing over the bus | Planned | roadmap item 3 |
 | Spawn budgets and agent TTL | Planned | roadmap |
-| Per-agent signing keys | Planned | roadmap |
+| Asymmetric signatures and signed quorum votes | Planned | roadmap item 4 |
 | NATS or Redis Streams transport | Planned | roadmap |
 | Reinforcement learning (central training, decentralized execution) | Planned | roadmap |
 

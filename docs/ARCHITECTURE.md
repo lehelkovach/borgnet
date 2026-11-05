@@ -11,6 +11,7 @@ borgnet/
   agent.py             AgentRunner: one agent's select/claim/execute/report loop
   stigmergy.py         DemandMap: shared demand signal with evaporation
   memetic.py           Strategy and StrategyPool: fitness, selection, evolution
+  propagation.py       PeerExchange: trust-gated strategy sharing between agents
   security.py          SignedEnvelope, EnvelopeVerifier, QuorumManager, trust
   metrics.py           Counters and summaries
   models.py            Pydantic schemas for the draft protocol (not yet wired in)
@@ -52,26 +53,43 @@ queued --assign_task--> running --complete_task--> done | failed
   and change nothing otherwise, so a stale worker cannot finish or drop a task
   that was re-assigned, and no task is counted twice.
 
+### Presence
+
+`Simulation(presence_ttl=N)` expects every agent to call `heartbeat(agent_id)`
+at least once every `N` seconds of simulated time.
+
+- On each `tick()`, an agent silent for more than `N` seconds is dropped. Its
+  running tasks go back to the queue at once, without waiting for their
+  leases, and `metrics.lost_agents` counts it.
+- A dropped agent is no longer a member. `heartbeat()` returns `False` for it
+  until it is added again.
+- Without `presence_ttl`, agents are never dropped.
+
 ## Agent loop (`agent.py`)
 
 `AgentRunner` drives one agent against a shared `Simulation`, `DemandMap`,
-`StrategyPool`, and `TrustRegistry`. Several runners can share these objects;
-they coordinate only through the demand map and the leases.
+and `TrustRegistry`, plus a `StrategyPool`. The pool can be shared, or each
+agent can keep its own and exchange strategies through a `PeerExchange`.
+Runners coordinate only through the demand map, the leases, and that
+exchange.
 
 Each `step()` does the following:
 
-1. If the agent is quarantined, stop with outcome `quarantined`.
-2. Evaporate the demand map, then list the queued tasks the agent can handle.
+1. If the agent is quarantined, stop with outcome `quarantined`. A
+   quarantined agent therefore stops sending heartbeats.
+2. Send a heartbeat. If the simulation does not know the agent, because it
+   was dropped for silence or never added, add it again.
+3. Evaporate the demand map, then list the queued tasks the agent can handle.
    An agent with no declared capabilities handles every task type.
-3. Deposit demand for each candidate's type, then choose the candidate whose
+4. Deposit demand for each candidate's type, then choose the candidate whose
    type has the highest demand. If there is none, stop with outcome `idle`.
-4. Claim the task's lease.
-5. Pick a strategy from the pool by fitness-weighted selection, or none if the
+5. Claim the task's lease.
+6. Pick a strategy from the pool by fitness-weighted selection, or none if the
    pool is empty.
-6. Run the injected `Worker`. It returns a fitness score; raising models a
+7. Run the injected `Worker`. It returns a fitness score; raising models a
    worker that dies mid-task.
 
-| Result of step 6 | Outcome | Effect |
+| Result of step 7 | Outcome | Effect |
 |---|---|---|
 | Worker raised | `requeued` | Trust failure, strategy fitness 0, demand deposited, task requeued |
 | Fitness above `success_threshold` | `completed` | Task done, trust success, strategy fitness updated |
@@ -119,6 +137,34 @@ A `StrategyPool` holds up to `max_strategies` strategies.
 - `diversity()` is the number of distinct source agents divided by the pool
   size.
 
+## Strategy exchange (`propagation.py`)
+
+A `PeerExchange` is the horizontal channel between agents that each keep
+their own `StrategyPool`. Agents `join(agent_id, pool)`. `share(agent_id)`
+offers that agent's best strategy to every peer, or to `fanout` peers chosen
+at random. `gossip_round()` lets every member share once.
+
+Each receiver applies an `AdoptionPolicy` to every offer. It adopts only if
+all of these hold:
+
+| Check | Rejection reason |
+|---|---|
+| The sender is not the receiver | `self` |
+| The sender is a member of the exchange | `unknown_sender` |
+| The sender is not quarantined | `sender_quarantined` |
+| The sender's trust is at least `min_sender_trust`, default 0.8 | `sender_untrusted` |
+| The receiver does not already hold the same parameters | `already_known` |
+| The offered fitness beats the receiver's best by more than `fitness_margin` | `not_better` |
+
+The sender reports its own fitness, so an adopted strategy starts at the
+offered fitness times `prior_weight`, default 0.5. It then has to earn the
+rest through the receiver's own results. The adopted copy records the sender
+as its source and one more generation. `PeerExchange.outcomes` counts every
+decision by reason.
+
+Limits: the exchange is in-process, and a sender is not penalized when a
+strategy it shared does badly for the receiver.
+
 ## Security (`security.py`)
 
 ### Signed envelopes
@@ -129,13 +175,26 @@ fields are goal id, origin id, parent goal id, chain of custody, nonce, issue
 time, expiry, and payload. Changing any of them after signing breaks
 verification.
 
-`EnvelopeVerifier(secret).verify(envelope)` accepts an envelope only if the
+`EnvelopeVerifier.verify(envelope)` accepts an envelope only if the
 signature is valid, it has not expired, and its nonce has not been seen
-before. Limitations:
+before.
 
-- All agents share one secret, so any holder can sign as anyone.
-- Seen nonces are kept in memory without pruning, so replay protection resets
-  when the process restarts.
+- **Keys.** `EnvelopeVerifier(secret)` uses one key for every agent.
+  `EnvelopeVerifier(keys={origin_id: key})` gives each origin its own key, so
+  an envelope verifies only under the key of the origin it names, and unknown
+  origins are rejected.
+- **Freshness.** With `max_age_s`, envelopes issued longer ago than that, or
+  more than `clock_skew_s` in the future, are rejected.
+- **Replay memory.** A nonce is forgotten once its envelope would fail the
+  expiry or age check anyway. With `max_age_s` set, memory stays bounded.
+
+Limitations:
+
+- The keys are symmetric HMAC keys. Whoever runs the verifier holds every key
+  and could sign as anyone.
+- Seen nonces live in memory, so replay protection resets when the process
+  restarts.
+- Without `max_age_s`, nonces of envelopes with no expiry are kept forever.
 
 ### Quorum
 
