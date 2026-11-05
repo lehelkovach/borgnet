@@ -140,6 +140,12 @@ class AgentRunner:
             _log.warning("Agent quarantined, skipping step: agent=%s", self.agent.agent_id)
             return StepResult(outcome="quarantined")
 
+        # Each step is a heartbeat. An agent the simulation dropped for
+        # silence, or never added, (re)joins here.
+        if not self.sim.heartbeat(self.agent.agent_id):
+            _log.info("Agent (re)joining simulation: agent=%s", self.agent.agent_id)
+            self.sim.add_agent(self.agent)
+
         task = self._select_task()
         if task is None:
             return StepResult(outcome="idle")

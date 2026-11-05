@@ -29,12 +29,24 @@ class Agent:
 
 
 class Simulation:
-    def __init__(self) -> None:
+    """Tasks, agents, leases, and presence on a simulated clock.
+
+    With ``presence_ttl`` set, every agent must call :meth:`heartbeat` at
+    least once every ``presence_ttl`` seconds. An agent that stays silent for
+    longer is dropped on the next :meth:`tick`, and its running tasks go
+    straight back to the queue instead of waiting for their leases to expire.
+    """
+
+    def __init__(self, presence_ttl: Optional[int] = None) -> None:
+        if presence_ttl is not None and presence_ttl < 0:
+            raise ValueError(f"presence_ttl must be >= 0, got {presence_ttl}")
         self.tasks: Dict[str, Task] = {}
         self.agents: Dict[str, Agent] = {}
         self.metrics = Metrics()
         self.now = 0
-        _log.debug("Simulation initialized at t=0")
+        self.presence_ttl = presence_ttl
+        self.last_seen: Dict[str, int] = {}
+        _log.debug("Simulation initialized at t=0 presence_ttl=%s", presence_ttl)
 
     def add_task(self, task: Task) -> None:
         self.tasks[task.task_id] = task
@@ -48,6 +60,7 @@ class Simulation:
 
     def add_agent(self, agent: Agent) -> None:
         self.agents[agent.agent_id] = agent
+        self.last_seen[agent.agent_id] = self.now
         self.metrics.active_agents = len(self.agents)
         _log.info(
             "Agent added: id=%s role=%s capabilities=%s",
@@ -59,14 +72,55 @@ class Simulation:
     def remove_agent(self, agent_id: str) -> None:
         if agent_id in self.agents:
             del self.agents[agent_id]
+            self.last_seen.pop(agent_id, None)
             self.metrics.active_agents = len(self.agents)
             _log.info("Agent removed: id=%s", agent_id)
         else:
             _log.warning("Attempted to remove unknown agent: id=%s", agent_id)
 
+    def heartbeat(self, agent_id: str) -> bool:
+        """Record that ``agent_id`` is alive now. False if it is not a member.
+
+        An agent dropped for silence is no longer a member; it must be added
+        again with :meth:`add_agent`.
+        """
+        if agent_id not in self.agents:
+            _log.warning("Heartbeat from unknown agent: id=%s", agent_id)
+            return False
+        self.last_seen[agent_id] = self.now
+        return True
+
+    def _drop_silent_agents(self) -> None:
+        assert self.presence_ttl is not None
+        silent = sorted(
+            agent_id
+            for agent_id, seen in self.last_seen.items()
+            if self.now - seen > self.presence_ttl
+        )
+        for agent_id in silent:
+            orphaned = [
+                t.task_id
+                for t in self.tasks.values()
+                if t.status == "running" and t.owner == agent_id
+            ]
+            _log.warning(
+                "Agent missed heartbeats, dropping: id=%s last_seen=%d now=%d tasks=%s",
+                agent_id,
+                self.last_seen[agent_id],
+                self.now,
+                orphaned,
+            )
+            for task_id in orphaned:
+                self.requeue_task(task_id, agent_id=agent_id)
+            self.remove_agent(agent_id)
+            self.metrics.agent_lost()
+
     def tick(self, seconds: int = 1) -> None:
         self.now += seconds
         _log.debug("Tick: now=%d (+%d seconds)", self.now, seconds)
+
+        if self.presence_ttl is not None:
+            self._drop_silent_agents()
 
         expired_count = 0
         for task in self.tasks.values():

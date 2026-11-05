@@ -18,6 +18,7 @@ class Metrics:
     failed_tasks: int = 0
     reassigned_tasks: int = 0
     active_agents: int = 0
+    lost_agents: int = 0
     total_tasks: int = 0
     notes: Dict[str, float] = field(default_factory=dict)
 
@@ -47,6 +48,11 @@ class Metrics:
             self.reassigned_tasks,
         )
 
+    def agent_lost(self) -> None:
+        """Record an agent dropped for missing its heartbeats."""
+        self.lost_agents += 1
+        _log.warning("Agent lost: total_lost=%d", self.lost_agents)
+
     def record_note(self, key: str, value: float) -> None:
         """Record a custom metric note."""
         self.notes[key] = value
@@ -59,6 +65,7 @@ class Metrics:
             "failed_tasks": float(self.failed_tasks),
             "reassigned_tasks": float(self.reassigned_tasks),
             "active_agents": float(self.active_agents),
+            "lost_agents": float(self.lost_agents),
             "total_tasks": float(self.total_tasks),
             **self.notes,
         }
