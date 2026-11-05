@@ -17,7 +17,7 @@ Status values: **Done**, **Partial**, **Not started**.
 ### 1) Project scaffold — Partial
 | Item | Status | Notes |
 |---|---|---|
-| Python project with Poetry and pytest | Done | CI runs pytest on Python 3.10–3.13 |
+| Python project with Poetry and pytest | Done | CI runs pytest in OCI containers on Python 3.10–3.13, locally or on Nomad |
 | Core data models: task, lease, presence | Done | `sim.py`, `models.py` |
 | Goal DAG model | Not started | `networkx` is declared for this but not used yet |
 | Docs: protocol spec, threat model, evaluation metrics | Done | Drafts; see status notes in each doc |

@@ -1,7 +1,5 @@
 # BorgNet
 
-[![tests](https://github.com/lehelkovach/borgnet/actions/workflows/tests.yml/badge.svg)](https://github.com/lehelkovach/borgnet/actions/workflows/tests.yml)
-
 BorgNet is a research prototype for coordinating a swarm of goal-directed
 agents without a central scheduler. Agents pick work through a shared demand
 signal (stigmergy), hold tasks under expiring leases so a dead agent's work is
@@ -50,7 +48,7 @@ python3 -m venv .venv
 ./.venv/bin/pytest
 ```
 
-BorgNet needs Python 3.10 or newer. CI runs the suite on 3.10 through 3.13.
+BorgNet needs Python 3.10 or newer. CI tests 3.10 through 3.13.
 
 ### Run one agent in-process
 
@@ -95,13 +93,41 @@ This needs an IAC Bus that serves the queue endpoints
 logic also runs offline against an in-memory fake bus in
 `tests/test_demo_offline.py`.
 
-## Tests
+## Tests and CI
 
-- `pytest` runs everything. Live bus tests skip themselves unless an IAC Bus
-  answers at `BUS_URL` (default `http://127.0.0.1:8091`), with an optional
-  `BUS_API_TOKEN`.
-- GitHub Actions runs the suite on every pull request and on pushes to
-  `master`.
+`pytest` runs everything. Live bus tests skip themselves unless an IAC Bus
+answers at `BUS_URL` (default `http://127.0.0.1:8091`), with an optional
+`BUS_API_TOKEN`.
+
+CI runs in OCI containers, not on GitHub. `scripts/ci.sh` builds one test
+image per Python version from `Containerfile` and runs the suite in each. It
+works with Podman or Docker and exits non-zero if any version fails.
+
+```bash
+scripts/ci.sh local    # build the images and run the tests on this machine
+scripts/ci.sh build    # build only, and push when REGISTRY is set
+scripts/ci.sh nomad    # build, push, run on Nomad, wait, and print the logs
+```
+
+On Nomad, [`deploy/nomad/borgnet-ci.nomad.hcl`](deploy/nomad/borgnet-ci.nomad.hcl)
+is a parameterized batch job with one task group per Python version. The
+script registers it, dispatches a run tagged with the current git commit,
+waits for every group, and prints each group's test output. Failed runs are
+not retried.
+
+The Nomad clients need the `docker` or `podman` driver and must be able to get
+the images. Set `REGISTRY` to push them to a registry the clients can pull
+from, or leave it unset when the clients share the build machine's container
+engine.
+
+```bash
+REGISTRY=registry.service.consul:5000 \
+NOMAD_ADDR=http://nomad.service.consul:4646 \
+  scripts/ci.sh nomad
+```
+
+The top of `scripts/ci.sh` lists every setting, including the Python
+versions, the Nomad driver, and an optional bus URL for live tests.
 
 ## Documentation
 
