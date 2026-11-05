@@ -54,12 +54,13 @@ are decomposed into subgoals and executed by a self‑organizing swarm.
 - **Memetic** (`borgnet/memetic.py`) — strategy pool with evolution and propagation
 - **Security** (`borgnet/security.py`) — signed envelopes, quorum voting, trust scoring
 - **Models** (`borgnet/models.py`) — Pydantic message/task/presence schemas
-- **Transport** (`borgnet/transport/iac_bus.py`) — IAC Bus HTTP adapter
+- **Transport** (`borgnet/transport/iac_bus.py`) — IAC Bus HTTP adapter with queue leasing (enqueue/claim/ack/nack)
+- **Demo** (`borgnet/demo/master_worker.py`) — master/workers kill-recovery demo over live bus queues
 
 ## Tests
-- 64 unit and integration tests
+- 75 unit and integration tests
 - Run with `pytest -v`
-- Live transport tests require running IAC bus (`BUS_URL` env var)
+- Live transport and demo tests require running IAC bus (`BUS_URL` env var)
 
 ## Quick Start
 ```bash
@@ -73,6 +74,12 @@ python3 -m venv .venv
 
 # Run tests
 ./.venv/bin/pytest -v
+
+# Master/workers kill-recovery demo (requires a running IAC bus):
+# one worker dies mid-lease and a survivor recovers its task after expiry
+./.venv/bin/python scripts/demo_master_workers.py \
+  --bus-url http://127.0.0.1:8091 --token devtoken \
+  --tasks 8 --workers 3 --lease-seconds 5
 ```
 
 ## Repository Docs
