@@ -12,6 +12,8 @@ borgnet/
   stigmergy.py         DemandMap: shared demand signal with evaporation
   memetic.py           Strategy and StrategyPool: fitness, selection, evolution
   propagation.py       PeerExchange: trust-gated strategy sharing between agents
+  spawn.py             SpawnController: authorized replication within a budget
+  scenarios.py         Scenario harness: fault injection, insiders, baseline, metrics
   security.py          SignedEnvelope, EnvelopeVerifier, QuorumManager, trust
   metrics.py           Counters and summaries
   models.py            Pydantic schemas for the draft protocol (not yet wired in)
@@ -44,7 +46,13 @@ queued --assign_task--> running --complete_task--> done | failed
 ```
 
 - `assign_task(task_id, agent_id)` sets the owner and a lease that expires at
-  `now + lease_ttl`.
+  `now + lease_ttl`, and returns `True`. It refuses, returning `False`, when
+  the task is not queued, when the agent is not a member or was retired, and,
+  with `Simulation(trust=...)`, when the agent is quarantined. The simulation
+  is the lease authority, so these rules hold even for a caller that skips
+  the cooperative agent loop.
+- `retire_agent(agent_id)` removes an agent for good and requeues its tasks.
+  A retired agent cannot be added again.
 - `tick()` returns every running task whose lease has expired to the queue and
   counts it as reassigned.
 - `complete_task(task_id, success, agent_id=None)` and
@@ -157,13 +165,70 @@ all of these hold:
 | The offered fitness beats the receiver's best by more than `fitness_margin` | `not_better` |
 
 The sender reports its own fitness, so an adopted strategy starts at the
-offered fitness times `prior_weight`, default 0.5. It then has to earn the
-rest through the receiver's own results. The adopted copy records the sender
-as its source and one more generation. `PeerExchange.outcomes` counts every
-decision by reason.
+offered fitness times `prior_weight`, default 0.5. With `cap_at_receiver_best`,
+on by default, that starting value is also capped at the receiver's own best.
+The copy then competes on equal footing and has to earn a higher score from
+local results before it dominates or gets shared on. Without the cap, an
+inflated claim from a still-trusted sender spreads from peer to peer; the
+scenario suite measured that cascade quarantining honest agents. The adopted
+copy records the sender as its source and one more generation.
+`PeerExchange.outcomes` counts every decision by reason.
 
 Limits: the exchange is in-process, and a sender is not penalized when a
 strategy it shared does badly for the receiver.
+
+## Spawn control (`spawn.py`)
+
+Agents create agents only through a `SpawnController`, with a signed
+authorization from the control plane. `authorize_spawn(parent_id, count, key)`
+builds one: a `SignedEnvelope` from the authority whose payload names the
+action, the parent, and how many children.
+
+`request(parent_id, authorization)` checks, in order:
+
+| Check | Rejection |
+|---|---|
+| The envelope's origin is the authority | `unauthorized` |
+| Signature, expiry, age, and nonce pass the `EnvelopeVerifier` | `unauthorized` |
+| The payload is a spawn for this parent with a positive integer count | `out_of_scope` |
+| The parent is a member | `unknown_parent` |
+| The parent is not quarantined | `parent_quarantined` |
+| Children would be within `max_depth` generations of a root | `depth_limit` |
+| The parent would have at most `max_children` live children | `parent_limit` |
+| The population would stay within `max_agents` | `population_limit` |
+
+Authorization comes first, so a forged or replayed request learns nothing
+about the budget. A valid authorization is used up even if the budget then
+rejects the request. A request spawns every child or none.
+
+With `child_ttl`, `retire_expired()` retires children whose lifetime has run
+out, requeues their tasks, and keeps them from rejoining. `unaccounted(roots)`
+lists members that neither started as roots nor came through the controller,
+which is how an audit catches replication that bypassed it.
+
+## Scenario harness (`scenarios.py`)
+
+`run_scenario(Scenario(...))` runs a population of agents on the simulated
+clock with tasks that take several ticks, so agents hold leases while they
+work. A `Scenario` sets the population, load, timeouts, and the faults and
+attacks to inject: silent crashes, a coordinator outage, compromised
+insiders, and authorized respawn of lost agents. `coordination` is either
+`stigmergy` or `central`, a first-in, first-out scheduler used as the
+baseline.
+
+Insiders call the shared APIs directly instead of going through the
+cooperative loop. They attempt lease theft, completing other agents' tasks,
+forged and replayed spawn authorizations, sabotage, and strategy poisoning.
+Each refused attempt is reported to trust as an anomaly.
+
+Each run returns a `ScenarioReport`: task success, throughput, orphaned and
+recovered work, ticks to reclaim, rule-breaking attempts and how many were
+accepted, uncontrolled spawns, authorized spawns, trust false positives and
+negatives, poisoned adoptions, and late-versus-early success. Runs are
+deterministic per seed and restore the global random state.
+`run_suite(scenarios, seeds)` aggregates, and `python -m borgnet.scenarios`
+prints the default paired suite. Results and their limits are in
+[`EVALUATION.md`](EVALUATION.md).
 
 ## Security (`security.py`)
 
@@ -289,6 +354,9 @@ Limits of the current implementation:
   but agents can still crowd onto one type.
 - The decay rate and deposit amount trade responsiveness against stability,
   and there is no tuning guidance yet.
-- No benchmark yet compares stigmergic selection with a central queue or with
-  contract-net bidding. Until the scenario suites in the roadmap exist, the
-  benefits above are design hypotheses, not measured results.
+- The scenario suite compares stigmergic selection with a central queue.
+  Without faults they perform the same. A coordinator outage stalls only the
+  central queue, but that follows from the model, since the central queue has
+  a single scheduler. Graceful degradation and flat coordination cost across
+  real networks are still hypotheses until agents run on separate machines.
+  Contract-net bidding has not been compared. See `EVALUATION.md`.

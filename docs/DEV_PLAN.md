@@ -37,9 +37,9 @@ Status values: **Done**, **Partial**, **Not started**.
 |---|---|---|
 | Node failure injection | Done | Worker death in agent tests; kill-recovery demo, offline and live |
 | Failure detection by heartbeat | Done | Simulation presence TTL (roadmap item 7) |
-| Malicious or corrupted agent simulation | Not started | Trust and quarantine are unit-tested only |
+| Malicious or corrupted agent simulation | Done | Scripted insiders in `scenarios.py` |
 | Metrics: task completion | Done | `metrics.py` |
-| Metrics: recovery time, anomaly false-positive rate | Not started | Roadmap item 8 |
+| Metrics: recovery time, anomaly false-positive rate | Done | Reported per run; see `EVALUATION.md` |
 
 ### 4) Transport adapters — Partial
 | Item | Status | Notes |
@@ -69,18 +69,21 @@ Numbered so code and commits can refer to items. Items are roughly in order.
    envelope age, and a nonce store that forgets nonces once replays would
    fail anyway. Remaining: asymmetric signatures, signed quorum votes, and a
    persistent nonce store.
-5. **Goal DAG and control plane.** Not started. Global goal decomposed into a
-   DAG of subgoals with `networkx`, plus resource and spawn budgets.
+5. **Goal DAG and control plane.** Partial. Done: spawn budgets with signed
+   control-plane authorization and child lifetimes, in `borgnet/spawn.py`.
+   Remaining: the global goal as a DAG of subgoals with `networkx`, and
+   resource budgets.
 6. **Contract-net bidding.** Not started. Request, propose, and agree flow
    for delegating subgoals.
 7. **Heartbeats and presence.** Done in the simulation. Agents that miss
    their heartbeats are dropped and their tasks requeued before leases
    expire. See `Simulation(presence_ttl=...)`. Heartbeats over the bus are
    part of item 3.
-8. **Scenario suites and evaluation.** Not started. Multi-agent runs with node
-   loss, partitions, malicious agents, and backlog spikes. Measure recovery
-   time, throughput, and anomaly false-positive rate, and compare stigmergic
-   task selection with a central queue.
+8. **Scenario suites and evaluation.** Done for a single process.
+   `borgnet/scenarios.py` runs node loss, coordinator outage, insiders, and
+   authorized respawn under stigmergy and a central queue, and
+   `docs/EVALUATION.md` reports the results. Remaining: partitions and
+   message loss, which need item 3, and adaptive adversaries.
 9. **NATS or Redis Streams transport.** Not started.
 10. **Optional reinforcement learning loop** with central training and
     decentralized execution. Not started.
@@ -104,7 +107,7 @@ Numbered so code and commits can refer to items. Items are roughly in order.
 | Replay rejection by nonce | Done; bounded with a maximum age, in memory only |
 | Quorum approval for critical actions | Done, with optional voter roster |
 | Lease and heartbeat timeouts for self-healing | Done in the simulation |
-| Spawn budgets to prevent uncontrolled growth | Not started |
+| Spawn budgets to prevent uncontrolled growth | Done; signed authorization, population, per-parent, depth, and lifetime limits |
 
 ## Reference Systems to Adapt (benign)
 - NATS or Redis Streams for message transport.
@@ -115,7 +118,7 @@ Numbered so code and commits can refer to items. Items are roughly in order.
 ## Evaluation Metrics
 | Metric | Measured today |
 |---|---|
-| Throughput (tasks per minute) | Counts only; no rate yet |
-| Resilience (time to recover from node loss) | No; the demo reports elapsed time only |
+| Throughput (tasks per minute) | Yes, tasks per tick in the scenario suite |
+| Resilience (time to recover from node loss) | Yes, ticks to reclaim orphaned work and recovery rate |
 | Stability (variance in completion rates) | No |
-| Security (false positive and false negative rate for anomalies) | No |
+| Security (false positive and false negative rate for anomalies) | Yes, honest agents and insiders quarantined per run |

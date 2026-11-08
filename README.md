@@ -24,6 +24,9 @@ is which.
 | Per-agent signing keys and bounded replay memory | Implemented, symmetric keys | `borgnet/security.py` |
 | N-of-M quorum voting with optional voter roster | Implemented | `borgnet/security.py` |
 | Trust scores and quarantine | Implemented | `borgnet/security.py` |
+| Lease rules enforced by the simulation, not only by cooperative agents | Implemented | `borgnet/sim.py` |
+| Spawn budgets with signed control-plane authorization and child lifetimes | Implemented | `borgnet/spawn.py` |
+| Scenario suites with fault injection, insiders, and a central-queue baseline | Implemented, single process | `borgnet/scenarios.py` |
 | Throughput and failure counters | Implemented | `borgnet/metrics.py` |
 | IAC Bus HTTP client: messages and queue leasing | Implemented | `borgnet/transport/iac_bus.py` |
 | Master/workers kill-recovery demo over a live bus | Implemented, needs an IAC Bus with queue endpoints | `borgnet/demo/` |
@@ -31,7 +34,6 @@ is which.
 | Goal DAG and control plane | Planned | roadmap |
 | Contract-net bidding for delegation | Planned | roadmap |
 | Heartbeats and strategy sharing over the bus | Planned | roadmap item 3 |
-| Spawn budgets and agent TTL | Planned | roadmap |
 | Asymmetric signatures and signed quorum votes | Planned | roadmap item 4 |
 | NATS or Redis Streams transport | Planned | roadmap |
 | Reinforcement learning (central training, decentralized execution) | Planned | roadmap |
@@ -111,6 +113,7 @@ but no local Python packages. npm installs nothing for this project.
 | `npm test` | Build the images and run the suite on Python 3.10 through 3.13 |
 | `npm run test:host` | Run the suite with the Python on your `PATH`, without containers |
 | `npm run build:images` | Build the images only, and push them when `REGISTRY` is set |
+| `npm run scenarios` | Run the scenario suite and print its results tables |
 
 Settings are environment variables, for example:
 
@@ -143,6 +146,7 @@ any hooks you keep in `.git/hooks`.
 | Doc | What it covers |
 |---|---|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Module-by-module reference, the agent step cycle, lease and quorum rules, and why the design uses stigmergy |
+| [`docs/EVALUATION.md`](docs/EVALUATION.md) | Measured results from the scenario suite, what they show, and their limits |
 | [`docs/DEV_PLAN.md`](docs/DEV_PLAN.md) | Milestones with status and the numbered roadmap |
 | [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | Draft message envelope and performatives, and how far the code follows it |
 | [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) | Adversarial assumptions, threats, and the status of each mitigation |
