@@ -17,6 +17,7 @@ from borgnet.security import (
 )
 from borgnet.agent import AgentRunner, StepResult, StubWorker, Worker
 from borgnet.propagation import AdoptionPolicy, PeerExchange, StrategyOffer
+from borgnet.spawn import SpawnBudget, SpawnController, SpawnResult, authorize_spawn
 
 __all__ = [
     "configure_logging",
@@ -45,4 +46,8 @@ __all__ = [
     "AdoptionPolicy",
     "PeerExchange",
     "StrategyOffer",
+    "SpawnBudget",
+    "SpawnController",
+    "SpawnResult",
+    "authorize_spawn",
 ]
