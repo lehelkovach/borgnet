@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from borgnet.logging import get_logger
 from borgnet.metrics import Metrics
+from borgnet.security import TrustRegistry
 
 _log = get_logger("sim")
 
@@ -35,9 +36,18 @@ class Simulation:
     least once every ``presence_ttl`` seconds. An agent that stays silent for
     longer is dropped on the next :meth:`tick`, and its running tasks go
     straight back to the queue instead of waiting for their leases to expire.
+
+    The simulation is the lease authority, so it enforces who may hold a
+    lease no matter how a caller behaves. :meth:`assign_task` grants a lease
+    only on a queued task, and only to a current member that has not been
+    retired. With ``trust`` attached, quarantined agents are refused too.
     """
 
-    def __init__(self, presence_ttl: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        presence_ttl: Optional[int] = None,
+        trust: Optional[TrustRegistry] = None,
+    ) -> None:
         if presence_ttl is not None and presence_ttl < 0:
             raise ValueError(f"presence_ttl must be >= 0, got {presence_ttl}")
         self.tasks: Dict[str, Task] = {}
@@ -45,7 +55,9 @@ class Simulation:
         self.metrics = Metrics()
         self.now = 0
         self.presence_ttl = presence_ttl
+        self.trust = trust
         self.last_seen: Dict[str, int] = {}
+        self.retired: Set[str] = set()
         _log.debug("Simulation initialized at t=0 presence_ttl=%s", presence_ttl)
 
     def add_task(self, task: Task) -> None:
@@ -59,6 +71,9 @@ class Simulation:
         )
 
     def add_agent(self, agent: Agent) -> None:
+        """Add ``agent`` as a member. Raises ValueError for a retired agent."""
+        if agent.agent_id in self.retired:
+            raise ValueError(f"Agent was retired and cannot rejoin: {agent.agent_id}")
         self.agents[agent.agent_id] = agent
         self.last_seen[agent.agent_id] = self.now
         self.metrics.active_agents = len(self.agents)
@@ -77,6 +92,35 @@ class Simulation:
             _log.info("Agent removed: id=%s", agent_id)
         else:
             _log.warning("Attempted to remove unknown agent: id=%s", agent_id)
+
+    def is_retired(self, agent_id: str) -> bool:
+        """True if ``agent_id`` was retired and may never rejoin."""
+        return agent_id in self.retired
+
+    def retire_agent(self, agent_id: str) -> List[str]:
+        """Remove ``agent_id`` for good and requeue its running tasks.
+
+        Unlike :meth:`remove_agent`, a retired agent cannot be added again, so
+        an agent whose lifetime ran out cannot come back on its own. Returns
+        the ids of the requeued tasks.
+        """
+        requeued = self._release_tasks(agent_id)
+        if agent_id in self.agents:
+            self.remove_agent(agent_id)
+        self.retired.add(agent_id)
+        _log.info("Agent retired: id=%s requeued=%s", agent_id, requeued)
+        return requeued
+
+    def _release_tasks(self, agent_id: str) -> List[str]:
+        """Requeue every running task leased to ``agent_id``."""
+        owned = [
+            t.task_id
+            for t in self.tasks.values()
+            if t.status == "running" and t.owner == agent_id
+        ]
+        for task_id in owned:
+            self.requeue_task(task_id, agent_id=agent_id)
+        return owned
 
     def heartbeat(self, agent_id: str) -> bool:
         """Record that ``agent_id`` is alive now. False if it is not a member.
@@ -98,20 +142,13 @@ class Simulation:
             if self.now - seen > self.presence_ttl
         )
         for agent_id in silent:
-            orphaned = [
-                t.task_id
-                for t in self.tasks.values()
-                if t.status == "running" and t.owner == agent_id
-            ]
             _log.warning(
-                "Agent missed heartbeats, dropping: id=%s last_seen=%d now=%d tasks=%s",
+                "Agent missed heartbeats, dropping: id=%s last_seen=%d now=%d",
                 agent_id,
                 self.last_seen[agent_id],
                 self.now,
-                orphaned,
             )
-            for task_id in orphaned:
-                self.requeue_task(task_id, agent_id=agent_id)
+            self._release_tasks(agent_id)
             self.remove_agent(agent_id)
             self.metrics.agent_lost()
 
@@ -142,19 +179,31 @@ class Simulation:
         if expired_count > 0:
             _log.info("Tick complete: %d leases expired and requeued", expired_count)
 
-    def assign_task(self, task_id: str, agent_id: str) -> None:
+    def assign_task(self, task_id: str, agent_id: str) -> bool:
+        """Grant ``agent_id`` a lease on a queued task. False if refused.
+
+        Refused when the task is not queued (so a running task's lease cannot
+        be taken over), when the agent is not a member or was retired, and,
+        with ``trust`` attached, when the agent is quarantined.
+        """
         if task_id not in self.tasks:
             _log.error("Cannot assign unknown task: task_id=%s", task_id)
             raise KeyError(f"Task not found: {task_id}")
 
-        if agent_id not in self.agents:
-            _log.warning(
-                "Assigning task to unknown agent: task=%s agent=%s",
-                task_id,
-                agent_id,
-            )
-
         task = self.tasks[task_id]
+        reason = None
+        if task.status != "queued":
+            reason = f"task is {task.status}"
+        elif agent_id not in self.agents:
+            reason = "agent is retired" if agent_id in self.retired else "agent is not a member"
+        elif self.trust is not None and self.trust.is_quarantined(agent_id):
+            reason = "agent is quarantined"
+        if reason is not None:
+            _log.warning(
+                "Lease refused: task=%s agent=%s reason=%s", task_id, agent_id, reason
+            )
+            return False
+
         task.status = "running"
         task.owner = agent_id
         task.lease_expires_at = self.now + task.lease_ttl
@@ -165,6 +214,7 @@ class Simulation:
             agent_id,
             task.lease_expires_at,
         )
+        return True
 
     def _check_lease(self, task: Task, action: str, agent_id: Optional[str]) -> bool:
         """Return True if ``task`` holds a live lease that ``agent_id`` may act on.

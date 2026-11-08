@@ -127,3 +127,20 @@ class TestAgentRunner:
         assert sim.metrics.completed_tasks == 0
         assert trust.get_or_create("a1").score == 1.0
         assert pool.strategies[result.strategy_id].fitness == 0.0
+
+    def test_retired_agent_stops(self):
+        runner, sim, _, _, _ = _runner(StubWorker(fitness=1.0))
+        sim.retire_agent("a1")
+        assert runner.step().outcome == "retired"
+        assert "a1" not in sim.agents
+        assert sim.tasks["t1"].status == "queued"
+
+    def test_lease_refused_by_simulation(self):
+        runner, sim, _, _, trust = _runner(StubWorker(fitness=1.0))
+        sim.trust = trust
+        # Quarantine is enforced by the simulation, not only by the runner.
+        runner.trust = TrustRegistry()
+        trust.record_anomaly("a1")
+        trust.record_anomaly("a1")
+        assert runner.step().outcome == "refused"
+        assert sim.tasks["t1"].status == "queued"

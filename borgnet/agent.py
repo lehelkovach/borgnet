@@ -62,6 +62,7 @@ class StepResult:
     """Outcome of a single :meth:`AgentRunner.step`."""
 
     # "completed" | "failed" | "requeued" | "lease_lost" | "idle" | "quarantined"
+    # | "refused" | "retired"
     outcome: str
     task_id: Optional[str] = None
     strategy_id: Optional[str] = None
@@ -140,6 +141,9 @@ class AgentRunner:
             _log.warning("Agent quarantined, skipping step: agent=%s", self.agent.agent_id)
             return StepResult(outcome="quarantined")
 
+        if self.sim.is_retired(self.agent.agent_id):
+            return StepResult(outcome="retired")
+
         # Each step is a heartbeat. An agent the simulation dropped for
         # silence, or never added, (re)joins here.
         if not self.sim.heartbeat(self.agent.agent_id):
@@ -150,8 +154,10 @@ class AgentRunner:
         if task is None:
             return StepResult(outcome="idle")
 
-        # Claim the lease.
-        self.sim.assign_task(task.task_id, self.agent.agent_id)
+        # Claim the lease. The simulation may refuse it, for example when the
+        # agent is quarantined there.
+        if not self.sim.assign_task(task.task_id, self.agent.agent_id):
+            return StepResult(outcome="refused", task_id=task.task_id)
 
         # Select a strategy to execute under (may be None if the pool is empty).
         selected = self.pool.select(1)
@@ -214,7 +220,7 @@ class AgentRunner:
         for _ in range(max_steps):
             result = self.step()
             results.append(result)
-            if result.outcome in ("idle", "quarantined"):
+            if result.outcome in ("idle", "quarantined", "retired", "refused"):
                 break
         _log.info(
             "AgentRunner finished: agent=%s steps=%d last=%s",

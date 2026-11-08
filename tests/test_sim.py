@@ -42,6 +42,7 @@ def test_requeue_unknown_task_raises():
 def test_zero_ttl_lease_expires():
     # Regression: an expiry time of 0 is falsy and used to never expire.
     sim = Simulation()
+    sim.add_agent(Agent(agent_id="a1"))
     sim.add_task(Task(task_id="t1", task_type="deploy", lease_ttl=0))
     sim.assign_task("t1", "a1")
     sim.tick(1)
@@ -51,6 +52,7 @@ def test_zero_ttl_lease_expires():
 def test_double_completion_counted_once():
     # Regression: completing a finished task again used to count it twice.
     sim = Simulation()
+    sim.add_agent(Agent(agent_id="a1"))
     sim.add_task(Task(task_id="t1", task_type="deploy"))
     sim.assign_task("t1", "a1")
     assert sim.complete_task("t1") is True
@@ -68,6 +70,8 @@ def test_complete_queued_task_rejected():
 
 def test_stale_owner_cannot_complete_reassigned_task():
     sim = Simulation()
+    sim.add_agent(Agent(agent_id="a1"))
+    sim.add_agent(Agent(agent_id="a2"))
     sim.add_task(Task(task_id="t1", task_type="deploy", lease_ttl=10))
     sim.assign_task("t1", "a1")
     sim.tick(10)  # a1's lease expires
@@ -79,6 +83,7 @@ def test_stale_owner_cannot_complete_reassigned_task():
 
 def test_requeue_finished_task_rejected():
     sim = Simulation()
+    sim.add_agent(Agent(agent_id="a1"))
     sim.add_task(Task(task_id="t1", task_type="deploy"))
     sim.assign_task("t1", "a1")
     sim.complete_task("t1")
@@ -89,7 +94,55 @@ def test_requeue_finished_task_rejected():
 
 def test_requeue_by_non_owner_rejected():
     sim = Simulation()
+    sim.add_agent(Agent(agent_id="a1"))
+    sim.add_agent(Agent(agent_id="a2"))
     sim.add_task(Task(task_id="t1", task_type="deploy"))
     sim.assign_task("t1", "a1")
     assert sim.requeue_task("t1", agent_id="a2") is False
     assert sim.tasks["t1"].status == "running"
+
+
+def test_running_task_lease_cannot_be_taken_over():
+    sim = Simulation()
+    sim.add_agent(Agent(agent_id="a1"))
+    sim.add_agent(Agent(agent_id="thief"))
+    sim.add_task(Task(task_id="t1", task_type="deploy"))
+    assert sim.assign_task("t1", "a1") is True
+    assert sim.assign_task("t1", "thief") is False
+    assert sim.tasks["t1"].owner == "a1"
+
+
+def test_lease_refused_to_non_member():
+    sim = Simulation()
+    sim.add_task(Task(task_id="t1", task_type="deploy"))
+    assert sim.assign_task("t1", "ghost") is False
+    assert sim.tasks["t1"].status == "queued"
+
+
+def test_lease_refused_to_quarantined_agent():
+    from borgnet.security import TrustRegistry
+
+    trust = TrustRegistry()
+    sim = Simulation(trust=trust)
+    sim.add_agent(Agent(agent_id="a1"))
+    sim.add_task(Task(task_id="t1", task_type="deploy"))
+    trust.record_anomaly("a1")
+    trust.record_anomaly("a1")
+    assert trust.is_quarantined("a1")
+    assert sim.assign_task("t1", "a1") is False
+
+
+def test_retired_agent_releases_tasks_and_cannot_rejoin():
+    sim = Simulation()
+    sim.add_agent(Agent(agent_id="a1"))
+    sim.add_task(Task(task_id="t1", task_type="deploy", lease_ttl=60))
+    sim.assign_task("t1", "a1")
+    assert sim.retire_agent("a1") == ["t1"]
+    assert sim.tasks["t1"].status == "queued"
+    assert sim.is_retired("a1")
+    assert sim.assign_task("t1", "a1") is False
+    try:
+        sim.add_agent(Agent(agent_id="a1"))
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
