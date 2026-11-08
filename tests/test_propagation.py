@@ -33,9 +33,41 @@ class TestAdoption:
         assert exchange.share("a") == ["b"]
         adopted = [s for s in exchange.pools["b"].strategies.values() if s.params == {"x": 1}]
         assert len(adopted) == 1
-        assert adopted[0].fitness == pytest.approx(1.0)  # discounted by prior_weight
+        # Discounted to 2.0 * 0.5 = 1.0, then capped at the receiver's best, 0.5.
+        assert adopted[0].fitness == pytest.approx(0.5)
         assert adopted[0].source_agent == "a"
         assert adopted[0].generation == 1
+
+    def test_uncapped_policy_keeps_discounted_fitness(self):
+        policy = AdoptionPolicy(cap_at_receiver_best=False)
+        exchange, _ = _exchange(policy, a=_pool(({"x": 1}, 2.0)), b=_pool(({"x": 0}, 0.5)))
+        exchange.share("a")
+        adopted = [s for s in exchange.pools["b"].strategies.values() if s.params == {"x": 1}]
+        assert adopted[0].fitness == pytest.approx(1.0)
+
+    def test_inflated_claim_is_not_laundered_to_other_peers(self):
+        # "mallory" is still trusted and claims an inflated fitness. "b" adopts,
+        # but the cap keeps the copy at b's own best, so b's next share is not
+        # better than c's best and the claim stops at b.
+        exchange, _ = _exchange(
+            mallory=_pool(({"x": 9}, 100.0)),
+            b=_pool(({"x": 0}, 0.8)),
+            c=_pool(({"x": 1}, 0.8)),
+        )
+        exchange.offer("b", StrategyOffer("mallory", "s", {"x": 9}, 100.0, 0))
+        assert exchange.share("b") == []
+
+    def test_uncapped_policy_launders_inflated_claim(self):
+        # The vulnerability the cap fixes, kept as a regression reference.
+        policy = AdoptionPolicy(cap_at_receiver_best=False)
+        exchange, _ = _exchange(
+            policy,
+            mallory=_pool(({"x": 9}, 100.0)),
+            b=_pool(({"x": 0}, 0.8)),
+            c=_pool(({"x": 1}, 0.8)),
+        )
+        exchange.offer("b", StrategyOffer("mallory", "s", {"x": 9}, 100.0, 0))
+        assert "c" in exchange.share("b")
 
     def test_rejects_offer_that_is_not_better(self):
         exchange, _ = _exchange(a=_pool(({"x": 1}, 2.0)), b=_pool(({"x": 0}, 3.0)))

@@ -11,6 +11,12 @@ discounted fitness, because the sender reports its own fitness: the strategy
 has to prove itself through the receiver's own results before it dominates
 the receiver's selection.
 
+By default that starting fitness is also capped at the receiver's own best.
+Without the cap, an inflated claim from a still-trusted sender becomes the
+receiver's top strategy, and the receiver then re-shares it to its peers as
+a trusted sender. The scenario suite measured that laundering cascade getting
+honest agents quarantined; see ``docs/EVALUATION.md``.
+
 This exchange runs in-process. Carrying offers over the IAC Bus belongs to
 roadmap item 3.
 """
@@ -68,11 +74,15 @@ class AdoptionPolicy:
             strategy by more than this.
         prior_weight: An adopted strategy starts at the offered fitness times
             this factor, between 0 and 1.
+        cap_at_receiver_best: Also cap that starting fitness at the
+            receiver's best strategy, so an adopted strategy competes on equal
+            footing until local results raise it.
     """
 
     min_sender_trust: float = 0.8
     fitness_margin: float = 0.0
     prior_weight: float = 0.5
+    cap_at_receiver_best: bool = True
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.prior_weight <= 1.0:
@@ -150,9 +160,13 @@ class PeerExchange:
             )
             return False
 
+        fitness = offer.fitness * self.policy.prior_weight
+        best = self.pools[receiver_id].best()
+        if self.policy.cap_at_receiver_best and best is not None:
+            fitness = min(fitness, best.fitness)
         adopted = Strategy(
             params=dict(offer.params),
-            fitness=offer.fitness * self.policy.prior_weight,
+            fitness=fitness,
             source_agent=offer.sender_id,
             generation=offer.generation + 1,
         )
