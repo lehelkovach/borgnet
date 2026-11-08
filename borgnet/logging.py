@@ -11,6 +11,11 @@ from typing import Optional
 DEFAULT_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+# A library should not print unless the application asks it to. Without a
+# handler, Python's last-resort handler prints every warning to stderr. Call
+# configure_logging() to see BorgNet's logs.
+logging.getLogger("borgnet").addHandler(logging.NullHandler())
+
 
 def get_logger(name: str) -> logging.Logger:
     """Get a logger for a BorgNet module."""

@@ -7,6 +7,7 @@
     "test": "scripts/ci.sh local",
     "test:host": "python3 -m pytest",
     "build:images": "scripts/ci.sh build",
+    "scenarios": "python3 -m borgnet.scenarios",
     "hooks:enable": "git config core.hooksPath .githooks",
     "hooks:disable": "git config --unset core.hooksPath"
   }
